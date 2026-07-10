@@ -1,0 +1,205 @@
+import { spawn } from "node:child_process";
+import { once } from "node:events";
+import type { Duplex, Readable, Writable } from "node:stream";
+
+import type {
+  ByteChannel,
+  ByteWriter,
+  Runtime,
+  RuntimeFinished,
+  RuntimeInstance,
+  StartRequest,
+} from "../core/runtime.ts";
+import {
+  createNodeBootstrapSource,
+  nodeChannelFd,
+  nodeChannelFdEnvironmentVariable,
+} from "../node-runtime/bootstrap.ts";
+
+export { readNode24TypeDefinitions } from "./node24.ts";
+
+export class HostNodeRuntime implements Runtime {
+  readonly #nodePath: string;
+
+  constructor(options: { readonly nodePath: string }) {
+    this.#nodePath = options.nodePath;
+  }
+
+  async start(req: StartRequest): Promise<RuntimeInstance> {
+    const child = spawn(this.#nodePath, [
+      "--input-type=module",
+      "--eval",
+      createNodeBootstrapSource(req.program),
+    ], {
+      env: {
+        ...process.env,
+        [nodeChannelFdEnvironmentVariable]: String(nodeChannelFd),
+      },
+      stdio: ["ignore", "ignore", "pipe", "pipe"],
+    });
+
+    const fd3 = child.stdio[3];
+    assertChannelStream(fd3);
+
+    const channel: ByteChannel = {
+      incoming: readableChunks(fd3),
+      outgoing: new NodeWritableByteWriter(fd3),
+    };
+
+    let stderr = "";
+    child.stderr?.setEncoding("utf8");
+    child.stderr?.on("data", (chunk: string) => {
+      stderr += chunk;
+    });
+
+    let terminationRequested = false;
+
+    const abort = (): void => {
+      terminationRequested = true;
+      child.kill("SIGTERM");
+    };
+
+    if (req.signal.aborted) {
+      abort();
+    } else {
+      req.signal.addEventListener("abort", abort, { once: true });
+    }
+
+    const finished = new Promise<RuntimeFinished>((resolve) => {
+      let settled = false;
+
+      const settle = (result: RuntimeFinished): void => {
+        if (settled) {
+          return;
+        }
+
+        settled = true;
+        req.signal.removeEventListener("abort", abort);
+        resolve(result);
+      };
+
+      child.once("error", (error) => {
+        settle({
+          kind: "failed",
+          error,
+        });
+      });
+
+      child.once("close", (code, signal) => {
+        if (terminationRequested) {
+          settle({ kind: "closed" });
+          return;
+        }
+
+        if (code === 0 && signal === null) {
+          settle({ kind: "closed" });
+          return;
+        }
+
+        settle({
+          kind: "failed",
+          error: new Error(formatChildFailure(code, signal, stderr)),
+        });
+      });
+    });
+
+    return {
+      channel,
+      finished,
+      async terminate(reason: string): Promise<void> {
+        void reason;
+        terminationRequested = true;
+        child.kill("SIGTERM");
+        await finished;
+      },
+    };
+  }
+}
+
+async function* readableChunks(readable: Readable): AsyncIterable<Uint8Array> {
+  for await (const chunk of readable) {
+    if (chunk instanceof Uint8Array) {
+      yield chunk;
+      continue;
+    }
+
+    if (typeof chunk === "string") {
+      yield Buffer.from(chunk);
+      continue;
+    }
+
+    throw new Error("Host Node.js runtime emitted an unsupported channel chunk");
+  }
+}
+
+function assertChannelStream(value: unknown): asserts value is Duplex {
+  if (
+    value === null ||
+    typeof value !== "object" ||
+    typeof (value as Writable).write !== "function" ||
+    typeof (value as Writable).end !== "function" ||
+    typeof (value as Readable)[Symbol.asyncIterator] !== "function"
+  ) {
+    throw new Error("Host Node.js runtime did not create fd 3");
+  }
+}
+
+function formatChildFailure(
+  code: number | null,
+  signal: NodeJS.Signals | null,
+  stderr: string,
+): string {
+  const status = `Host Node.js runtime failed with exit code ${code}, signal ${signal}`;
+  const detail = stderr.trim();
+
+  if (detail.length === 0) {
+    return status;
+  }
+
+  return `${status}: ${detail}`;
+}
+
+class NodeWritableByteWriter implements ByteWriter {
+  readonly #writable: Writable;
+
+  constructor(writable: Writable) {
+    this.#writable = writable;
+  }
+
+  async write(chunk: Uint8Array): Promise<void> {
+    if (this.#writable.destroyed || this.#writable.writableEnded) {
+      throw new Error("Host Node.js runtime channel is closed");
+    }
+
+    if (this.#writable.write(chunk)) {
+      return;
+    }
+
+    await once(this.#writable, "drain");
+  }
+
+  async close(): Promise<void> {
+    if (this.#writable.destroyed || this.#writable.writableEnded) {
+      return;
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const onError = (error: Error): void => {
+        cleanup();
+        reject(error);
+      };
+      const onFinish = (): void => {
+        cleanup();
+        resolve();
+      };
+      const cleanup = (): void => {
+        this.#writable.off("error", onError);
+        this.#writable.off("finish", onFinish);
+      };
+
+      this.#writable.once("error", onError);
+      this.#writable.once("finish", onFinish);
+      this.#writable.end();
+    });
+  }
+}

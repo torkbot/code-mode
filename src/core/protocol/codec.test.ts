@@ -1,0 +1,127 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { BSON, Binary } from "bson";
+
+import {
+  encodeHostMessage,
+  encodeProgramMessage,
+  readHostMessages,
+  readProgramMessages,
+} from "./codec.ts";
+
+test("protocol codec writes length-prefixed BSON host messages", () => {
+  const packet = encodeHostMessage({
+    kind: "tool-result",
+    id: "tool-1",
+    result: {
+      ok: true,
+    },
+  });
+  const frameLength = new DataView(packet.buffer, packet.byteOffset, 4).getUint32(0, true);
+
+  assert.equal(frameLength, packet.byteLength - 4);
+  assert.deepEqual(BSON.deserialize(packet.subarray(4)), {
+    kind: "tool-result",
+    id: "tool-1",
+    result: {
+      ok: true,
+    },
+  });
+});
+
+test("protocol codec reads chunked BSON program messages", async () => {
+  const left = encodeProgramMessage({
+    kind: "tool-call",
+    id: "call-1",
+    name: "lookup",
+    input: {
+      query: "London",
+    },
+    stack: "Error: Tool call stack",
+  });
+  const right = encodeProgramMessage({
+    kind: "completed",
+  });
+  const combined = new Uint8Array(left.byteLength + right.byteLength);
+  combined.set(left, 0);
+  combined.set(right, left.byteLength);
+  const chunks = [
+    combined.subarray(0, 3),
+    combined.subarray(3, 13),
+    combined.subarray(13),
+  ];
+
+  assert.deepEqual(await collect(readProgramMessages(fromChunks(chunks))), [
+    {
+      kind: "tool-call",
+      id: "call-1",
+      name: "lookup",
+      input: {
+        query: "London",
+      },
+      stack: "Error: Tool call stack",
+    },
+    {
+      kind: "completed",
+    },
+  ]);
+});
+
+test("protocol codec preserves BSON binary values", async () => {
+  const packet = encodeHostMessage({
+    kind: "tool-result",
+    id: "binary",
+    result: {
+      data: new Binary(new Uint8Array([1, 2, 3])),
+    },
+  });
+  const [message] = await collect(readHostMessages(fromChunks([packet])));
+
+  assert.equal(message?.kind, "tool-result");
+  assert.ok(message.result instanceof Object);
+  assert.deepEqual(
+    (message.result as { readonly data: Binary }).data.buffer,
+    Buffer.from([1, 2, 3]),
+  );
+});
+
+test("protocol codec rejects malformed program messages", async () => {
+  const malformed = encodeRawBsonFrame({
+    kind: "tool-call",
+    id: "call-1",
+    input: {},
+    stack: "Error: Tool call stack",
+  });
+
+  await assert.rejects(
+    async () => {
+      await collect(readProgramMessages(fromChunks([malformed])));
+    },
+    /name/,
+  );
+});
+
+function encodeRawBsonFrame(document: Record<string, unknown>): Uint8Array {
+  const frame = BSON.serialize(document);
+  const packet = new Uint8Array(4 + frame.byteLength);
+  new DataView(packet.buffer, packet.byteOffset, 4).setUint32(0, frame.byteLength, true);
+  packet.set(frame, 4);
+  return packet;
+}
+
+async function collect<T>(values: AsyncIterable<T>): Promise<T[]> {
+  const collected: T[] = [];
+
+  for await (const value of values) {
+    collected.push(value);
+  }
+
+  return collected;
+}
+
+async function* fromChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  for (const chunk of chunks) {
+    yield chunk;
+  }
+}
