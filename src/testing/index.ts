@@ -66,6 +66,44 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.equal(executions, 1);
   });
 
+  test(`${options.name}: declarations match empty inputs, logging, and trailing comments`, async () => {
+    const runtime = await options.createRuntime();
+    const client = createClient({
+      runtime,
+      toolbox: createToolbox([
+        defineTool(
+          "ping",
+          {
+            description: "Ping without arguments.",
+            inputSchema: EmptyObject,
+            outputSchema: EmptyObject,
+          },
+          async () => ({}),
+        ),
+      ]),
+      environment: testEnvironment,
+    });
+
+    const invalid = await client.validate(
+      "async ({ codemode }) => { await codemode.ping(42); }",
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    assert.equal(invalid.kind, "invalid");
+
+    const source = `async ({ codemode }) => {
+      console.log("ping");
+      await codemode.ping({});
+    } // trailing comment`;
+    assert.deepEqual(
+      await client.validate(source, { signal: AbortSignal.timeout(5_000) }),
+      { kind: "valid" },
+    );
+    assert.deepEqual(
+      await client.run(source, { signal: AbortSignal.timeout(5_000) }).result,
+      { kind: "success" },
+    );
+  });
+
   test(`${options.name}: checking reports syntax, unknown tools, bounded diagnostics, and cancellation`, async () => {
     const runtime = await options.createRuntime();
     const client = createClient({
@@ -169,6 +207,13 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.equal(unknown.kind, "program-failed");
     assert.match(unknown.error.message, /No code-mode tool is registered/);
 
+    const inherited = await emptyClient.run(
+      "async ({ codemode }) => { await codemode.toString({}); }",
+      { signal: AbortSignal.timeout(5_000) },
+    ).result;
+    assert.equal(inherited.kind, "program-failed");
+    assert.match(inherited.error.message, /No code-mode tool is registered for toString/);
+
     const failingClient = createClient({
       runtime,
       toolbox: createFailingToolbox(),
@@ -180,6 +225,16 @@ export function testRuntime(options: RuntimeTestOptions): void {
     ).result;
     assert.equal(toolFailure.kind, "program-failed");
     assert.equal(toolFailure.error.message, "tool contract failure");
+
+    const recovered = await failingClient.run(
+      `async ({ codemode }) => {
+        try {
+          await codemode.fail({});
+        } catch {}
+      }`,
+      { signal: AbortSignal.timeout(5_000) },
+    ).result;
+    assert.deepEqual(recovered, { kind: "success" });
   });
 
   test(`${options.name}: telemetry is ordered and callback failures cannot alter execution`, async () => {
@@ -225,6 +280,10 @@ export function testRuntime(options: RuntimeTestOptions): void {
     await assert.rejects(
       client.run("async () => {}", { signal: controller.signal }).result,
     );
+    await assert.rejects(
+      client.run("async ({", { signal: controller.signal }).result,
+      /cancel before start/,
+    );
 
     const blocking = createBlockingToolbox();
     const blockingClient = createClient({
@@ -267,6 +326,25 @@ export function testRuntime(options: RuntimeTestOptions): void {
     const outcome = await result;
     assert.equal(outcome.kind, "program-failed");
     assert.match(outcome.error.message, /must await every tool call/);
+  });
+
+  test(`${options.name}: an unawaited tool failure still fails the program`, async () => {
+    const runtime = await options.createRuntime();
+    const client = createClient({
+      runtime,
+      toolbox: createUnobservedFailureToolbox(),
+      environment: testEnvironment,
+    });
+
+    const outcome = await client.run(`async ({ codemode }) => {
+      void codemode.fail({});
+      await codemode.waitForFailure({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    }).result;
+
+    assert.equal(outcome.kind, "program-failed");
+    assert.equal(outcome.error.message, "unobserved tool failure");
   });
 
   test(`${options.name}: one client supports isolated concurrent executions`, async () => {
@@ -357,7 +435,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.equal(validation.kind, "invalid");
     assert.deepEqual(JSON.parse(JSON.stringify(validation)), validation);
     assert.equal(validation.diagnostics[0]?.file, "agent.ts");
-    assert.equal(typeof validation.diagnostics[0]?.line, "number");
+    assert.equal(validation.diagnostics[0]?.line, 1);
     assert.equal(typeof validation.diagnostics[0]?.column, "number");
     assert.match(validation.diagnostics[0]?.code ?? "", /^TS/);
     assert.match(validation.diagnostics[0]?.message ?? "", /number.*string/);
@@ -890,6 +968,36 @@ function createFailingToolbox() {
       },
       async () => {
         throw new Error("tool contract failure");
+      },
+    ),
+  ]);
+}
+
+function createUnobservedFailureToolbox() {
+  const failureStarted = createDeferred<void>();
+  return createToolbox([
+    defineTool(
+      "fail",
+      {
+        description: "Fail without being awaited.",
+        inputSchema: EmptyObject,
+        outputSchema: EmptyObject,
+      },
+      async () => {
+        failureStarted.resolve();
+        throw new Error("unobserved tool failure");
+      },
+    ),
+    defineTool(
+      "waitForFailure",
+      {
+        description: "Wait until the failing call has started.",
+        inputSchema: EmptyObject,
+        outputSchema: EmptyObject,
+      },
+      async () => {
+        await failureStarted.promise;
+        return {};
       },
     ),
   ]);

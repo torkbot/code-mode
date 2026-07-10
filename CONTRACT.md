@@ -196,7 +196,8 @@ The normal agent loop is:
 
 Generated declarations tell the agent to use dynamic import() for runtime
 modules, return no value, avoid markdown fences, and submit only the function
-expression.
+expression. They also declare the runtime-supplied debug, error, info, log, and
+warn console methods.
 
 An agent may skip checking when latency matters. Execution remains safe because
 all tool inputs and outputs are validated on the host.

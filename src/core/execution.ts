@@ -70,6 +70,8 @@ export async function execute(req: ExecuteRequest): Promise<ExecuteResult> {
 async function executeInner(
   req: ExecuteRequest,
 ): Promise<ExecuteResult> {
+  req.signal.throwIfAborted();
+
   let program;
   try {
     program = createProgram({ agentSource: req.agentSource });

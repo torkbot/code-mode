@@ -1,7 +1,9 @@
+import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { Readable, Writable } from "node:stream";
 import type { Duplex } from "node:stream";
+import test from "node:test";
 
 import { testRuntime } from "../testing/index.ts";
 import {
@@ -20,6 +22,52 @@ testRuntime({
       cwd: process.cwd(),
     });
   },
+});
+
+test("sandbox-node observes a signal aborted during spawn", async () => {
+  const controller = new AbortController();
+  let killed = false;
+  const emptyReadable = (): ReadableStream<Uint8Array> => new ReadableStream({
+    start(streamController) {
+      streamController.close();
+    },
+  });
+  const writable = (): WritableStream<Uint8Array> => new WritableStream();
+  const sandbox: SandboxNodeHost = {
+    spawn() {
+      controller.abort(new Error("cancel during spawn"));
+      return {
+        stdin: writable(),
+        stdout: emptyReadable(),
+        stderr: emptyReadable(),
+        pipes: new Map([[3, {
+          input: writable(),
+          output: emptyReadable(),
+        }]]),
+        ready: Promise.resolve(),
+        exit: Promise.resolve({ exitCode: null, signal: "SIGTERM" }),
+        kill() {
+          killed = true;
+        },
+      };
+    },
+  };
+  const runtime = new SandboxNodeRuntime({
+    sandbox,
+    nodePath: process.execPath,
+    cwd: process.cwd(),
+  });
+
+  const instance = await runtime.start({
+    program: {
+      kind: "javascript-module",
+      source: "export async function startProgram() {}",
+    },
+    signal: controller.signal,
+  });
+
+  assert.equal(killed, true);
+  assert.deepEqual(await instance.finished, { kind: "closed" });
 });
 
 class HostBackedSandbox implements SandboxNodeHost {

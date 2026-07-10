@@ -84,7 +84,11 @@ export class SandboxNodeRuntime implements Runtime {
       terminationRequested = true;
       process.kill("SIGTERM");
     };
-    req.signal.addEventListener("abort", abort, { once: true });
+    if (req.signal.aborted) {
+      abort();
+    } else {
+      req.signal.addEventListener("abort", abort, { once: true });
+    }
 
     const stdout = drain(process.stdout);
     const stderr = readText(process.stderr);

@@ -44,7 +44,7 @@ test("agent source validation returns serializable diagnostics for type errors",
   assert.equal(failure?.kind, "typecheck");
   assert.deepEqual(JSON.parse(JSON.stringify(failure)), failure);
   assert.equal(failure.diagnostics[0]?.file, "agent.ts");
-  assert.equal(typeof failure.diagnostics[0]?.line, "number");
+  assert.equal(failure.diagnostics[0]?.line, 2);
   assert.equal(typeof failure.diagnostics[0]?.column, "number");
   assert.match(failure.diagnostics[0]?.code ?? "", /^TS/);
   assert.match(failure.diagnostics[0]?.message ?? "", /number.*string/);
@@ -67,4 +67,42 @@ test("agent source validation requires promise to void", async () => {
   assert.equal(failure?.kind, "typecheck");
   assert.match(failure.diagnostics[0]?.message ?? "", /Promise<string>.*Promise<void>/);
   assert.match(failure.report, /Promise<string>.*Promise<void>/);
+});
+
+test("agent source validation mounts package metadata without checking it as source", async () => {
+  const failure = await validateAgentSource({
+    signal: AbortSignal.timeout(5_000),
+    typeDefinitions,
+    typeDefinitionFiles: [
+      {
+        path: "node_modules/example/package.json",
+        contents: JSON.stringify({ types: "index.d.ts" }),
+      },
+      {
+        path: "node_modules/example/index.d.ts",
+        contents: "export const value: string;",
+      },
+    ],
+    source: `async () => {
+      const example = await import("example");
+      void example.value;
+    }`,
+  });
+
+  assert.equal(failure, undefined);
+});
+
+test("agent source validation rejects syntax the runtime cannot erase", async () => {
+  const failure = await validateAgentSource({
+    signal: AbortSignal.timeout(5_000),
+    typeDefinitions,
+    typeDefinitionFiles: [],
+    source: `async () => {
+      enum Direction { Up }
+      void Direction;
+    }`,
+  });
+
+  assert.equal(failure?.kind, "typecheck");
+  assert.match(failure.diagnostics[0]?.message ?? "", /erasableSyntaxOnly/);
 });

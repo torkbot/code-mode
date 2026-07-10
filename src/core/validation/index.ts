@@ -35,6 +35,7 @@ const projectRoot = "/__code_mode__";
 const agentFile = `${projectRoot}/agent.ts`;
 const typesFile = `${projectRoot}/codemode.d.ts`;
 const tsconfigFile = `${projectRoot}/tsconfig.json`;
+const agentSourceLineOffset = 2;
 
 export async function validateAgentSource(
   req: ValidateAgentSourceRequest,
@@ -61,10 +62,16 @@ export async function validateAgentSource(
         throw new Error("Code-mode typecheck did not create a TypeScript project");
       }
 
+      const configDiagnostics = await project.program.getConfigFileParsingDiagnostics();
+      throwIfAborted(req.signal);
+      const syntacticDiagnostics = await project.program.getSyntacticDiagnostics();
+      throwIfAborted(req.signal);
+      const semanticDiagnostics = await project.program.getSemanticDiagnostics();
+      throwIfAborted(req.signal);
       const diagnostics = [
-        ...(await project.program.getConfigFileParsingDiagnostics()),
-        ...(await project.program.getSyntacticDiagnostics()),
-        ...(await project.program.getSemanticDiagnostics()),
+        ...configDiagnostics,
+        ...syntacticDiagnostics,
+        ...semanticDiagnostics,
       ];
 
       if (diagnostics.length === 0) {
@@ -75,8 +82,8 @@ export async function validateAgentSource(
         kind: "typecheck",
         diagnostics: diagnostics
           .slice(0, maxReportedDiagnostics)
-          .map((diagnostic) => serializeDiagnostic(diagnostic, files)),
-        report: formatDiagnosticReport(diagnostics, files),
+          .map((diagnostic) => serializeDiagnostic(diagnostic, files, req.source)),
+        report: formatDiagnosticReport(diagnostics, files, req.source),
       };
     } finally {
       await snapshot.dispose();
@@ -97,12 +104,20 @@ function createValidationFiles(
 
   for (const file of req.typeDefinitionFiles) {
     const virtualPath = toVirtualRuntimeTypePath(file.path);
-    runtimeTypePaths.push(toProjectRelativePath(virtualPath));
+    if (isTypeScriptDeclarationPath(file.path)) {
+      runtimeTypePaths.push(toProjectRelativePath(virtualPath));
+    }
     files.set(virtualPath, file.contents);
   }
 
   files.set(tsconfigFile, createTypecheckTsconfig(runtimeTypePaths));
   return files;
+}
+
+function isTypeScriptDeclarationPath(path: string): boolean {
+  return path.endsWith(".d.ts")
+    || path.endsWith(".d.mts")
+    || path.endsWith(".d.cts");
 }
 
 function toVirtualRuntimeTypePath(path: string): string {
@@ -149,6 +164,7 @@ function createTypecheckTsconfig(runtimeTypePaths: readonly string[]): string {
         moduleResolution: "nodenext",
         lib: ["es2024"],
         strict: true,
+        erasableSyntaxOnly: true,
         noEmit: true,
         skipLibCheck: true,
       },
@@ -256,9 +272,10 @@ function getAccessibleEntries(
 function formatDiagnosticReport(
   diagnostics: readonly Diagnostic[],
   files: ReadonlyMap<string, string>,
+  agentSource: string,
 ): string {
   const rendered = diagnostics.slice(0, maxReportedDiagnostics).map((diagnostic, index) => (
-    formatDiagnosticBlock(index + 1, diagnostic, files)
+    formatDiagnosticBlock(index + 1, diagnostic, files, agentSource)
   ));
 
   if (diagnostics.length > maxReportedDiagnostics) {
@@ -278,12 +295,14 @@ function formatDiagnosticBlock(
   index: number,
   diagnostic: Diagnostic,
   files: ReadonlyMap<string, string>,
+  agentSource: string,
 ): string {
   const file = formatDiagnosticFile(diagnostic.fileName);
-  const source = diagnostic.fileName === undefined ? undefined : files.get(diagnostic.fileName);
-  const position = source === undefined
-    ? { line: 1, column: 1 }
-    : getLineAndColumn(source, diagnostic.pos);
+  const { source, position } = getDiagnosticSourceAndPosition(
+    diagnostic,
+    files,
+    agentSource,
+  );
   const header = `${index}. ${diagnosticCode(diagnostic)} at ${file}:${position.line}:${position.column}`;
   const message = indentLines(diagnostic.text, "   ");
   const frame = source === undefined
@@ -360,12 +379,14 @@ function truncateReport(report: string): string {
 function serializeDiagnostic(
   diagnostic: Diagnostic,
   files: ReadonlyMap<string, string>,
+  agentSource: string,
 ): TypecheckDiagnostic {
   const file = formatDiagnosticFile(diagnostic.fileName);
-  const source = diagnostic.fileName === undefined ? undefined : files.get(diagnostic.fileName);
-  const position = source === undefined
-    ? { line: 1, column: 1 }
-    : getLineAndColumn(source, diagnostic.pos);
+  const { position } = getDiagnosticSourceAndPosition(
+    diagnostic,
+    files,
+    agentSource,
+  );
 
   return {
     file,
@@ -373,6 +394,49 @@ function serializeDiagnostic(
     column: position.column,
     code: diagnosticCode(diagnostic),
     message: diagnostic.text,
+  };
+}
+
+function getDiagnosticSourceAndPosition(
+  diagnostic: Diagnostic,
+  files: ReadonlyMap<string, string>,
+  agentSource: string,
+): {
+  readonly source: string | undefined;
+  readonly position: { readonly line: number; readonly column: number };
+} {
+  if (diagnostic.fileName === agentFile) {
+    const wrappedSource = files.get(agentFile);
+    if (wrappedSource === undefined) {
+      return {
+        source: agentSource,
+        position: { line: 1, column: 1 },
+      };
+    }
+
+    const wrappedPosition = getLineAndColumn(wrappedSource, diagnostic.pos);
+    const submittedLine = Math.max(
+      1,
+      wrappedPosition.line - agentSourceLineOffset,
+    );
+    const maximumLine = Math.max(1, agentSource.split("\n").length);
+    return {
+      source: agentSource,
+      position: {
+        line: Math.min(submittedLine, maximumLine),
+        column: wrappedPosition.column,
+      },
+    };
+  }
+
+  const source = diagnostic.fileName === undefined
+    ? undefined
+    : files.get(diagnostic.fileName);
+  return {
+    source,
+    position: source === undefined
+      ? { line: 1, column: 1 }
+      : getLineAndColumn(source, diagnostic.pos),
   };
 }
 

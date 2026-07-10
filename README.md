@@ -111,7 +111,8 @@ number, integer, boolean, and null JSON Schemas. Object properties and required
 keys are preserved, and object schemas must explicitly set
 `additionalProperties: false`. Descriptions become JSDoc and string formats
 become `@format` tags. A schema that cannot be represented honestly is rejected
-during type generation.
+during type generation. The declarations also define the five runtime-supported
+console methods, so logging checks consistently across environments.
 
 ## Agent API
 
@@ -148,7 +149,9 @@ project. It mounts the toolbox declarations as `codemode.d.ts` and the
 environment's `typeDefinitionFiles` at their supplied virtual paths. Runtime
 type files are checker-only; they are not included in agent declarations or sent
 to the execution runtime.
-Diagnostics and reports are serializable and bounded.
+Validation enforces the same erasable-only TypeScript subset that execution can
+strip. Diagnostics use submitted-source positions; diagnostics and reports are
+serializable and bounded.
 
 `run()` does not typecheck. It strips erasable TypeScript syntax in memory, then
 executes JavaScript. Syntax unsupported by erasable-only TypeScript is a program

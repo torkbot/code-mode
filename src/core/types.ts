@@ -100,7 +100,7 @@ export function createToolbox(tools: readonly ExecutableToolDefinition[]): Toolb
   }
 
   const list = [...tools];
-  const byName: Record<string, ExecutableToolDefinition> = {};
+  const byName: Record<string, ExecutableToolDefinition> = Object.create(null);
 
   for (const tool of list) {
     const toolValue: unknown = tool;
@@ -204,6 +204,16 @@ export function generateTypes(req: TypeGenerationRequest): string {
   const methods = tools.map(printTool);
 
   return [
+    `interface Console {`,
+    `  debug(...values: unknown[]): void;`,
+    `  error(...values: unknown[]): void;`,
+    `  info(...values: unknown[]): void;`,
+    `  log(...values: unknown[]): void;`,
+    `  warn(...values: unknown[]): void;`,
+    `}`,
+    ``,
+    `declare const console: Console;`,
+    ``,
     `interface Tools {`,
     joinBlocks(methods),
     `}`,
@@ -407,7 +417,7 @@ function printObjectType(schema: ObjectJsonSchema, indent: string): string {
     ].join("\n"));
   }
   return propertyBlocks.length === 0
-    ? "{}"
+    ? "Record<string, never>"
     : `{\n${joinBlocks(propertyBlocks)}\n${indent}}`;
 }
 

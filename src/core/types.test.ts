@@ -66,7 +66,33 @@ test("declarations include schema annotations", () => {
   assert.match(toolbox.typeDefinitions, /readonly includeForecast\?: boolean/);
   assert.match(toolbox.typeDefinitions, /readonly temperature: number/);
   assert.match(toolbox.typeDefinitions, /@format date-time/);
+  assert.match(toolbox.typeDefinitions, /declare const console: Console/);
+  assert.match(toolbox.typeDefinitions, /log\(\.\.\.values: unknown\[\]\): void/);
   assert.match(toolbox.typeDefinitions, /type AgentProgram/);
+});
+
+test("empty closed object schemas require an object with no keys", () => {
+  const empty = testSchema({
+    type: "object",
+    properties: {},
+    additionalProperties: false,
+  } as const);
+  const toolbox = createToolbox([
+    defineTool(
+      "ping",
+      {
+        description: "Ping without arguments.",
+        inputSchema: empty,
+        outputSchema: empty,
+      },
+      async () => ({}),
+    ),
+  ]);
+
+  assert.match(
+    toolbox.typeDefinitions,
+    /ping\(input: Record<string, never>\): Promise<Record<string, never>>/,
+  );
 });
 
 test("type generation requests Standard JSON Schema input and output directions", () => {

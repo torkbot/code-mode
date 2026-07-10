@@ -143,6 +143,7 @@ export async function ${programEntrypointName}(channel) {
   let nextToolCallId = 0;
   const responses = readBsonFrames(channel.incoming)[Symbol.asyncIterator]();
   const pendingToolCalls = new Map();
+  const unobservedToolErrors = new Map();
   let responsePump;
   let writeQueue = Promise.resolve();
   const run = createAgentProgram(createProgramConsole(emitProgramLog));
@@ -154,8 +155,8 @@ export async function ${programEntrypointName}(channel) {
         }
 
         return (input) => {
+          const id = String(nextToolCallId++);
           const call = (async () => {
-            const id = String(nextToolCallId++);
             const response = waitForToolResponse(id, property);
 
             try {
@@ -173,8 +174,7 @@ export async function ${programEntrypointName}(channel) {
 
             return await response;
           })();
-          void call.catch(() => {});
-          return call;
+          return trackToolCall(id, call);
         };
       },
     }),
@@ -191,6 +191,9 @@ export async function ${programEntrypointName}(channel) {
     }
     if (pendingToolCalls.size > 0) {
       throw new Error("Code-mode agent program must await every tool call before completing");
+    }
+    if (unobservedToolErrors.size > 0) {
+      throw unobservedToolErrors.values().next().value;
     }
 
     await writeQueue;
@@ -219,6 +222,27 @@ export async function ${programEntrypointName}(channel) {
 
     ensureResponsePump();
     return response;
+  }
+
+  function trackToolCall(id, call) {
+    let observed = false;
+    void call.catch((error) => {
+      if (!observed) {
+        unobservedToolErrors.set(id, error);
+      }
+    });
+
+    return new Proxy(call, {
+      get(target, property) {
+        if (property === "then" || property === "catch" || property === "finally") {
+          observed = true;
+          unobservedToolErrors.delete(id);
+          return target[property].bind(target);
+        }
+
+        return Reflect.get(target, property, target);
+      },
+    });
   }
 
   function ensureResponsePump() {

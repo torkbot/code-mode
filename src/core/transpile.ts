@@ -10,7 +10,7 @@ const maxReportLength = 8_000;
 export function transpileAgentSource(source: string): TranspileResult {
   try {
     const result = transformSync(
-      `const ${agentProgramVariableName} = (${source});`,
+      `const ${agentProgramVariableName} = (${source}\n);`,
       {
         filename: "agent.ts",
         mode: "strip-only",
