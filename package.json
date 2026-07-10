@@ -44,7 +44,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc --project tsconfig.build.json --pretty",
-    "test": "node --test src/*.test.ts src/**/*.test.ts",
+    "test": "node --test",
     "types:generate": "rm -rf dist && tsc --project tsconfig.build.json --pretty --emitDeclarationOnly",
     "typecheck": "tsc --noEmit --pretty",
     "prepublishOnly": "node --run build"

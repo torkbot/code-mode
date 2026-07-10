@@ -3,12 +3,14 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { createProgram, startProgram } from "./program.ts";
+import { maximumBsonFrameLength, readProgramMessages } from "./protocol/codec.ts";
 import type {
   ByteChannel,
   Program,
   Runtime,
   RuntimeFinished,
   RuntimeInstance,
+  RuntimeProgramModule,
 } from "./runtime.ts";
 
 const encoder = new TextEncoder();
@@ -114,6 +116,42 @@ test("createProgram returns a discriminated self-contained module", () => {
   assert.match(program.source, /await run\(scope\)/);
 });
 
+test("generated programs reject oversized host frames before reading a payload", async () => {
+  const program = createProgram({
+    agentSource: "async ({ codemode }) => { await codemode.wait({}); }",
+  });
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
+  const runtimeProgram = await import(moduleUrl) as RuntimeProgramModule;
+  const writes: Uint8Array[] = [];
+  let outgoingClosed = false;
+
+  await runtimeProgram.startProgram({
+    incoming: singleChunk(encodeFrameLength(maximumBsonFrameLength + 1)),
+    outgoing: {
+      async write(chunk) {
+        writes.push(chunk);
+      },
+      async close() {
+        outgoingClosed = true;
+      },
+    },
+  });
+
+  const messages = [];
+  for await (const message of readProgramMessages(manyChunks(writes))) {
+    messages.push(message);
+  }
+  assert.deepEqual(messages.map((message) => message.kind), [
+    "telemetry",
+    "tool-call",
+    "program-error",
+  ]);
+  const failure = messages[2];
+  assert.equal(failure?.kind, "program-error");
+  assert.match(failure.error.message, /exceeds the maximum/);
+  assert.equal(outgoingClosed, true);
+});
+
 test("public core source does not expose Node-specific contracts", async () => {
   const coreFiles = await Promise.all([
     readFile(new URL("../index.ts", import.meta.url), "utf8"),
@@ -134,4 +172,14 @@ test("public core source does not expose Node-specific contracts", async () => {
 
 async function* singleChunk(chunk: Uint8Array): AsyncIterable<Uint8Array> {
   yield chunk;
+}
+
+async function* manyChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
+  yield* chunks;
+}
+
+function encodeFrameLength(frameLength: number): Uint8Array {
+  const header = new Uint8Array(4);
+  new DataView(header.buffer).setUint32(0, frameLength, true);
+  return header;
 }

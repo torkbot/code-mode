@@ -6,6 +6,7 @@ import { BSON, Binary } from "bson";
 import {
   encodeHostMessage,
   encodeProgramMessage,
+  maximumBsonFrameLength,
   readHostMessages,
   readProgramMessages,
 } from "./codec.ts";
@@ -101,6 +102,36 @@ test("protocol codec rejects malformed program messages", async () => {
     /name/,
   );
 });
+
+test("protocol codec rejects invalid frame lengths before reading a payload", async () => {
+  await assert.rejects(
+    collect(readProgramMessages(fromChunks([encodeFrameLength(4)]))),
+    /smaller than the minimum 5/,
+  );
+  await assert.rejects(
+    collect(readProgramMessages(fromChunks([
+      encodeFrameLength(maximumBsonFrameLength + 1),
+    ]))),
+    /exceeds the maximum/,
+  );
+});
+
+test("protocol codec rejects outbound messages above the frame limit", () => {
+  assert.throws(
+    () => encodeHostMessage({
+      kind: "tool-result",
+      id: "oversized",
+      result: "x".repeat(maximumBsonFrameLength),
+    }),
+    /exceeds the maximum/,
+  );
+});
+
+function encodeFrameLength(frameLength: number): Uint8Array {
+  const header = new Uint8Array(4);
+  new DataView(header.buffer).setUint32(0, frameLength, true);
+  return header;
+}
 
 function encodeRawBsonFrame(document: Record<string, unknown>): Uint8Array {
   const frame = BSON.serialize(document);

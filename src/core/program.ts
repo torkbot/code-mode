@@ -5,6 +5,11 @@ import {
   agentProgramVariableName,
   transpileAgentSource,
 } from "./transpile.ts";
+import {
+  bsonFrameHeaderLength,
+  maximumBsonFrameLength,
+  minimumBsonDocumentLength,
+} from "./protocol/limits.ts";
 
 export interface AgentProgramScope<TApi = unknown> {
   readonly codemode: TApi;
@@ -59,6 +64,10 @@ export class AgentSourceSyntaxError extends SyntaxError {
 function createRuntimeProgramSource(agentProgramJavaScript: string): string {
   return `
 ${bsonRuntimeSource}
+
+const bsonFrameHeaderLength = ${bsonFrameHeaderLength};
+const minimumBsonDocumentLength = ${minimumBsonDocumentLength};
+const maximumBsonFrameLength = ${maximumBsonFrameLength};
 
 const createAgentProgram = (console) => {
 ${agentProgramJavaScript}
@@ -416,53 +425,90 @@ function encodeBsonFrame(message) {
   const frameSize = BSON.calculateObjectSize(message, {
     ignoreUndefined: false,
   });
+  assertValidFrameLength(frameSize);
   const frame = BSON.serialize(message, {
     ignoreUndefined: false,
     minInternalBufferSize: frameSize,
   });
-  const packet = new Uint8Array(4 + frame.byteLength);
-  new DataView(packet.buffer, packet.byteOffset, 4).setUint32(0, frame.byteLength, true);
-  packet.set(frame, 4);
+  const packet = new Uint8Array(bsonFrameHeaderLength + frame.byteLength);
+  new DataView(
+    packet.buffer,
+    packet.byteOffset,
+    bsonFrameHeaderLength,
+  ).setUint32(0, frame.byteLength, true);
+  packet.set(frame, bsonFrameHeaderLength);
   return packet;
 }
 
 async function* readBsonFrames(incoming) {
-  let buffer = new Uint8Array(0);
+  const header = new Uint8Array(bsonFrameHeaderLength);
+  let headerLength = 0;
+  let frame;
 
   for await (const chunk of incoming) {
-    buffer = concatBytes(buffer, chunk);
+    let offset = 0;
 
-    for (;;) {
-      if (buffer.byteLength < 4) {
-        break;
+    while (offset < chunk.byteLength) {
+      if (frame === undefined) {
+        const headerBytes = Math.min(
+          bsonFrameHeaderLength - headerLength,
+          chunk.byteLength - offset,
+        );
+        header.set(chunk.subarray(offset, offset + headerBytes), headerLength);
+        headerLength += headerBytes;
+        offset += headerBytes;
+
+        if (headerLength < bsonFrameHeaderLength) {
+          continue;
+        }
+
+        const frameLength = new DataView(
+          header.buffer,
+          header.byteOffset,
+          bsonFrameHeaderLength,
+        ).getUint32(0, true);
+        assertValidFrameLength(frameLength);
+        frame = {
+          bytes: new Uint8Array(frameLength),
+          receivedLength: 0,
+        };
       }
 
-      const frameLength = new DataView(buffer.buffer, buffer.byteOffset, 4).getUint32(0, true);
-      const packetLength = 4 + frameLength;
+      const frameBytes = Math.min(
+        frame.bytes.byteLength - frame.receivedLength,
+        chunk.byteLength - offset,
+      );
+      frame.bytes.set(
+        chunk.subarray(offset, offset + frameBytes),
+        frame.receivedLength,
+      );
+      frame.receivedLength += frameBytes;
+      offset += frameBytes;
 
-      if (buffer.byteLength < packetLength) {
-        break;
+      if (frame.receivedLength === frame.bytes.byteLength) {
+        yield BSON.deserialize(frame.bytes);
+        headerLength = 0;
+        frame = undefined;
       }
-
-      yield BSON.deserialize(buffer.subarray(4, packetLength));
-      buffer = buffer.subarray(packetLength);
     }
   }
 
-  if (buffer.byteLength > 0) {
+  if (headerLength > 0 || frame !== undefined) {
     throw new Error("Code-mode BSON frame stream ended with a truncated frame");
   }
 }
 
-function concatBytes(left, right) {
-  if (left.byteLength === 0) {
-    return right;
+function assertValidFrameLength(frameLength) {
+  if (frameLength < minimumBsonDocumentLength) {
+    throw new Error(
+      \`Code-mode BSON frame length \${frameLength} is smaller than the minimum \${minimumBsonDocumentLength}\`,
+    );
   }
-
-  const result = new Uint8Array(left.byteLength + right.byteLength);
-  result.set(left, 0);
-  result.set(right, left.byteLength);
-  return result;
+  if (frameLength > maximumBsonFrameLength) {
+    throw new Error(
+      \`Code-mode BSON frame length \${frameLength} exceeds the maximum \${maximumBsonFrameLength}\`,
+    );
+  }
 }
 `;
 }

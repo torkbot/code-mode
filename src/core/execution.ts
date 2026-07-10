@@ -89,6 +89,31 @@ async function executeInner(
     program,
     signal: req.signal,
   });
+  const runtimeFailure = new AbortController();
+  const toolSignal = AbortSignal.any([req.signal, runtimeFailure.signal]);
+
+  try {
+    return await runRuntimeInstance(req, instance, toolSignal);
+  } catch (error) {
+    runtimeFailure.abort(error);
+    try {
+      await instance.terminate("Code-mode execution failed");
+    } catch (terminationError) {
+      throw new AggregateError(
+        [error, terminationError],
+        "Code-mode execution failed and its runtime could not be terminated",
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+}
+
+async function runRuntimeInstance(
+  req: ExecuteRequest,
+  instance: Awaited<ReturnType<Runtime["start"]>>,
+  toolSignal: AbortSignal,
+): Promise<ExecuteResult> {
   req.emitTelemetry({ kind: "runtime-started" });
   const pendingToolCalls = new Set<Promise<void>>();
   let writeQueue: Promise<void> = Promise.resolve();
@@ -139,7 +164,7 @@ async function executeInner(
         callStack: message.stack,
       });
       const result = await tool.execute({
-        signal: req.signal,
+        signal: toolSignal,
       }, input);
       const output = await validateToolValue({
         phase: "output",
