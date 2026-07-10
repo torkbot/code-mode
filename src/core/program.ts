@@ -153,6 +153,9 @@ export async function ${programEntrypointName}(channel) {
         if (typeof property !== "string") {
           return undefined;
         }
+        if (property === "then") {
+          return undefined;
+        }
 
         return (input) => {
           const id = String(nextToolCallId++);
@@ -241,9 +244,11 @@ export async function ${programEntrypointName}(channel) {
     return new Proxy(call, {
       get(target, property) {
         if (property === "then" || property === "catch" || property === "finally") {
-          observed = true;
-          unobservedToolCalls.delete(id);
-          return target[property].bind(target);
+          return (...args) => {
+            observed = true;
+            unobservedToolCalls.delete(id);
+            return target[property](...args);
+          };
         }
 
         return Reflect.get(target, property, target);

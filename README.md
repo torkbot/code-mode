@@ -103,8 +103,9 @@ Transforming schemas have four distinct type positions:
 | Agent receives validated output | `SchemaOutput<OutputSchema>` |
 
 `defineTool()` preserves those relationships in TypeScript inference. Tool names
-must be unique JavaScript identifiers, and descriptions must be non-empty because
-they document the generated declarations.
+must be unique JavaScript identifiers other than `then`, which is reserved so the
+tool object cannot become a JavaScript thenable. Descriptions must be non-empty
+because they document the generated declarations.
 
 The generated declaration printer currently supports object, array, string,
 number, integer, boolean, and null JSON Schemas. Object properties and required

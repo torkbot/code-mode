@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { access } from "node:fs/promises";
 import test from "node:test";
 
 import { testRuntime } from "../testing/index.ts";
@@ -87,6 +88,31 @@ test("host-node bounds stderr retained for process failures", async () => {
   assert.equal(finished.kind, "failed");
   assert.match(finished.error.message, /stderr sentinel/);
   assert.ok(finished.error.message.length < 66_000);
+});
+
+test("host-node rejects writes when the child closes its pipe", {
+  timeout: 5_000,
+}, async (t) => {
+  const immediateExitPath = "/usr/bin/false";
+  try {
+    await access(immediateExitPath);
+  } catch {
+    t.skip(`${immediateExitPath} is not available`);
+    return;
+  }
+
+  const runtime = new HostNodeRuntime({ nodePath: immediateExitPath });
+
+  await assert.rejects(
+    runtime.start({
+      program: {
+        kind: "javascript-module",
+        source: "x".repeat(2 * 1024 * 1024),
+      },
+      signal: AbortSignal.timeout(4_000),
+    }),
+    /EPIPE|closed|write/i,
+  );
 });
 
 function assertTypeDefinitionExists(

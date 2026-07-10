@@ -1,5 +1,4 @@
 import { spawn } from "node:child_process";
-import { once } from "node:events";
 import type { Duplex, Readable, Writable } from "node:stream";
 
 import type {
@@ -190,21 +189,46 @@ function formatChildFailure(
 
 class NodeWritableByteWriter implements ByteWriter {
   readonly #writable: Writable;
+  #writeError: Error | undefined;
 
   constructor(writable: Writable) {
     this.#writable = writable;
+    this.#writable.on("error", (error: Error) => {
+      this.#writeError ??= error;
+    });
   }
 
   async write(chunk: Uint8Array): Promise<void> {
+    if (this.#writeError !== undefined) {
+      throw this.#writeError;
+    }
     if (this.#writable.destroyed || this.#writable.writableEnded) {
       throw new Error("Host Node.js runtime channel is closed");
     }
 
-    if (this.#writable.write(chunk)) {
-      return;
-    }
+    await new Promise<void>((resolve, reject) => {
+      const onClose = (): void => {
+        cleanup();
+        reject(
+          this.#writeError
+          ?? new Error("Host Node.js runtime channel closed during a write"),
+        );
+      };
+      const onWrite = (error?: Error | null): void => {
+        cleanup();
+        if (error === null || error === undefined) {
+          resolve();
+          return;
+        }
+        reject(error);
+      };
+      const cleanup = (): void => {
+        this.#writable.off("close", onClose);
+      };
 
-    await once(this.#writable, "drain");
+      this.#writable.once("close", onClose);
+      this.#writable.write(chunk, onWrite);
+    });
   }
 
   async close(): Promise<void> {

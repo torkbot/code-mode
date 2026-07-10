@@ -106,6 +106,9 @@ export function createToolbox(tools: readonly ExecutableToolDefinition[]): Toolb
     const toolValue: unknown = tool;
     assertRecord(toolValue, "tool");
     assertIdentifier(tool.name, "tool name");
+    if (tool.name === "then") {
+      throw new Error("Code-mode tool name cannot be then");
+    }
     assertNonEmptyString(tool.description, `tool ${tool.name} description`);
     assertToolSchema(tool.inputSchema, `tool ${tool.name} inputSchema`);
     assertToolSchema(tool.outputSchema, `tool ${tool.name} outputSchema`);

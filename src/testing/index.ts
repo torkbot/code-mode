@@ -102,6 +102,13 @@ export function testRuntime(options: RuntimeTestOptions): void {
       await client.run(source, { signal: AbortSignal.timeout(5_000) }).result,
       { kind: "success" },
     );
+
+    assert.deepEqual(
+      await client.run("async ({ codemode }) => { await codemode; }", {
+        signal: AbortSignal.timeout(5_000),
+      }).result,
+      { kind: "success" },
+    );
   });
 
   test(`${options.name}: checking reports syntax, unknown tools, bounded diagnostics, and cancellation`, async () => {
@@ -384,6 +391,16 @@ export function testRuntime(options: RuntimeTestOptions): void {
 
     assert.equal(outcome.kind, "program-failed");
     assert.equal(outcome.error.message, "unobserved tool failure");
+
+    const methodRead = await client.run(`async ({ codemode }) => {
+      void codemode.fail({}).then;
+      await codemode.waitForFailure({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    }).result;
+
+    assert.equal(methodRead.kind, "program-failed");
+    assert.equal(methodRead.error.message, "unobserved tool failure");
   });
 
   test(`${options.name}: a completed unawaited tool call still fails the program`, async () => {

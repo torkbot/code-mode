@@ -124,3 +124,30 @@ test("agent source validation treats optional properties as absence-only", async
   assert.equal(failure?.kind, "typecheck");
   assert.match(failure.diagnostics[0]?.message ?? "", /exactOptionalPropertyTypes/);
 });
+
+test("agent source validation rejects runtime type path collisions", async () => {
+  await assert.rejects(
+    validateAgentSource({
+      signal: AbortSignal.timeout(5_000),
+      typeDefinitions,
+      typeDefinitionFiles: [
+        { path: "agent.ts", contents: "async () => {};" },
+      ],
+      source: "async () => {}",
+    }),
+    /path collides with another validation file: agent\.ts/,
+  );
+
+  await assert.rejects(
+    validateAgentSource({
+      signal: AbortSignal.timeout(5_000),
+      typeDefinitions,
+      typeDefinitionFiles: [
+        { path: "runtime.d.ts", contents: "interface RuntimeValue {}" },
+        { path: "runtime.d.ts", contents: "interface DifferentValue {}" },
+      ],
+      source: "async () => {}",
+    }),
+    /path collides with another validation file: runtime\.d\.ts/,
+  );
+});

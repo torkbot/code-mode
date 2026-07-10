@@ -20,8 +20,12 @@ export function readNode24TypeDefinitions(): Promise<
 async function readNode24TypeDefinitionsInner(): Promise<
   readonly TypeDefinitionFile[]
 > {
-  const nodeTypesRoot = dirname(require.resolve("@types/node/package.json"));
-  const undiciTypesRoot = dirname(require.resolve("undici-types/package.json"));
+  const nodeTypesPackage = require.resolve("@types/node/package.json");
+  const nodeTypesRoot = dirname(nodeTypesPackage);
+  const nodeTypesRequire = createRequire(nodeTypesPackage);
+  const undiciTypesRoot = dirname(
+    nodeTypesRequire.resolve("undici-types/package.json"),
+  );
 
   return [
     ...(await readTypeDefinitionPackage({

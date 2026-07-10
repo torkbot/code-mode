@@ -171,9 +171,11 @@ async function runRuntimeInstance(
         agentSource: req.agentSource,
         callStack: message.stack,
       });
+      toolSignal.throwIfAborted();
       const result = await tool.execute({
         signal: toolSignal,
       }, input);
+      toolSignal.throwIfAborted();
       const output = await validateToolValue({
         phase: "output",
         tool,
@@ -181,18 +183,21 @@ async function runRuntimeInstance(
         agentSource: req.agentSource,
         callStack: message.stack,
       });
+      await writeResponse({
+        kind: "tool-result",
+        id: message.id,
+        result: output,
+      });
       req.emitTelemetry({
         kind: "tool-call-completed",
         toolCallId: message.id,
         toolName: message.name,
         output,
       });
-      await writeResponse({
-        kind: "tool-result",
-        id: message.id,
-        result: output,
-      });
     } catch (error) {
+      if (toolSignal.aborted) {
+        return;
+      }
       req.emitTelemetry({
         kind: "tool-call-failed",
         toolCallId: message.id,
@@ -232,14 +237,12 @@ async function runRuntimeInstance(
           new Error("Code-mode program failed while tool calls were still running"),
         );
       }
-      await Promise.allSettled(pendingToolCalls);
-      await writeQueue;
+      await instance.terminate("Code-mode program failed");
       try {
         await instance.channel.outgoing.close();
       } catch {
         // The program may have closed the channel after sending its terminal error.
       }
-      await instance.terminate("Code-mode program failed");
       await assertRuntimeClosed(instance.finished, req.emitTelemetry);
 
       return {
@@ -256,14 +259,12 @@ async function runRuntimeInstance(
           new Error("Code-mode program completed while tool calls were still running"),
         );
       }
-      await Promise.allSettled(pendingToolCalls);
-      await writeQueue;
+      await instance.terminate("Code-mode program completed");
       try {
         await instance.channel.outgoing.close();
       } catch {
         // The program may have closed the channel after sending completion.
       }
-      await instance.terminate("Code-mode program completed");
       await assertRuntimeClosed(instance.finished, req.emitTelemetry);
 
       return {

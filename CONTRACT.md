@@ -76,11 +76,12 @@ const toolbox = createToolbox([
 const toolDeclarations = toolbox.typeDefinitions;
 ~~~
 
-Tool names must be unique JavaScript identifiers. Tool descriptions must be
-non-empty because they document generated declarations. Object schemas must
-explicitly set additionalProperties to false. Schema annotations are guidance,
-not correctness gates. Type generation rejects only schema constructs that cannot
-be represented without misleading the agent.
+Tool names must be unique JavaScript identifiers other than `then`, which is
+reserved so the tool object cannot become a JavaScript thenable. Tool descriptions
+must be non-empty because they document generated declarations. Object schemas
+must explicitly set additionalProperties to false. Schema annotations are
+guidance, not correctness gates. Type generation rejects only schema constructs
+that cannot be represented without misleading the agent.
 
 ## Embedder API
 

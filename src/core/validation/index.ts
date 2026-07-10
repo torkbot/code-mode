@@ -104,6 +104,11 @@ function createValidationFiles(
 
   for (const file of req.typeDefinitionFiles) {
     const virtualPath = toVirtualRuntimeTypePath(file.path);
+    if (virtualPath === tsconfigFile || files.has(virtualPath)) {
+      throw new Error(
+        `Code-mode runtime type definition path collides with another validation file: ${file.path}`,
+      );
+    }
     if (isTypeScriptDeclarationPath(file.path)) {
       runtimeTypePaths.push(toProjectRelativePath(virtualPath));
     }

@@ -140,6 +140,20 @@ test("toolbox rejects invalid names, duplicate names, and empty descriptions", (
     ]),
     /valid JavaScript identifier/,
   );
+  assert.throws(
+    () => createToolbox([
+      defineTool(
+        "then",
+        {
+          description: "Turn the toolbox into a thenable.",
+          inputSchema: schema,
+          outputSchema: schema,
+        },
+        async () => ({}),
+      ),
+    ]),
+    /tool name cannot be then/,
+  );
   assert.throws(() => createToolbox([valid, valid]), /tool names must be unique/);
   assert.throws(
     () => createToolbox([
