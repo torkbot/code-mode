@@ -13,6 +13,11 @@ export interface TelemetryError {
   readonly details: ErrorDetails | null;
 }
 
+export const maximumTelemetryErrorNameLength = 256;
+export const maximumTelemetryErrorMessageLength = 64 * 1024;
+export const maximumTelemetryErrorStackLength = 128 * 1024;
+export const maximumTelemetryErrorReportLength = 8 * 1024;
+
 export type ErrorDetails =
   | {
       readonly kind: "tool-validation";
@@ -130,27 +135,65 @@ export function errorFromUnknown(
 ): TelemetryError {
   if (error instanceof Error) {
     return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack ?? null,
-      details: isErrorWithDetails(error) ? error.details : null,
+      name: truncateTelemetryErrorField(
+        error.name,
+        maximumTelemetryErrorNameLength,
+      ),
+      message: truncateTelemetryErrorField(
+        error.message,
+        maximumTelemetryErrorMessageLength,
+      ),
+      stack: error.stack === undefined
+        ? null
+        : truncateTelemetryErrorField(
+          error.stack,
+          maximumTelemetryErrorStackLength,
+        ),
+      details: readErrorDetails(error),
     };
   }
 
   return {
     name: "Error",
-    message: String(error),
+    message: truncateTelemetryErrorField(
+      String(error),
+      maximumTelemetryErrorMessageLength,
+    ),
     stack: null,
     details: null,
   };
 }
 
-function isErrorWithDetails(error: Error): error is Error & {
-  readonly details: ErrorDetails;
-} {
-  return "details" in error
-    && typeof (error as { readonly details?: unknown }).details === "object"
-    && (error as { readonly details?: unknown }).details !== null;
+function readErrorDetails(error: Error): ErrorDetails | null {
+  const details = (error as { readonly details?: unknown }).details;
+
+  if (
+    typeof details !== "object"
+    || details === null
+    || !("kind" in details)
+    || details.kind !== "tool-validation"
+    || !("report" in details)
+    || typeof details.report !== "string"
+  ) {
+    return null;
+  }
+
+  return {
+    kind: "tool-validation",
+    report: truncateTelemetryErrorField(
+      details.report,
+      maximumTelemetryErrorReportLength,
+    ),
+  };
+}
+
+function truncateTelemetryErrorField(value: string, maximumLength: number): string {
+  if (value.length <= maximumLength) {
+    return value;
+  }
+
+  const suffix = "... <truncated>";
+  return `${value.slice(0, maximumLength - suffix.length)}${suffix}`;
 }
 
 class CallbackTelemetryEmitter implements TelemetryEmitter {

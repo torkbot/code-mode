@@ -108,9 +108,10 @@ they document the generated declarations.
 
 The generated declaration printer currently supports object, array, string,
 number, integer, boolean, and null JSON Schemas. Object properties and required
-keys are preserved; descriptions become JSDoc and string formats become
-`@format` tags. A schema that cannot be represented honestly is rejected during
-type generation.
+keys are preserved, and object schemas must explicitly set
+`additionalProperties: false`. Descriptions become JSDoc and string formats
+become `@format` tags. A schema that cannot be represented honestly is rejected
+during type generation.
 
 ## Agent API
 

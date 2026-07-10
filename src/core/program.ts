@@ -10,6 +10,12 @@ import {
   maximumBsonFrameLength,
   minimumBsonDocumentLength,
 } from "./protocol/limits.ts";
+import {
+  maximumTelemetryErrorMessageLength,
+  maximumTelemetryErrorNameLength,
+  maximumTelemetryErrorReportLength,
+  maximumTelemetryErrorStackLength,
+} from "./telemetry.ts";
 
 export interface AgentProgramScope<TApi = unknown> {
   readonly codemode: TApi;
@@ -68,6 +74,10 @@ ${bsonRuntimeSource}
 const bsonFrameHeaderLength = ${bsonFrameHeaderLength};
 const minimumBsonDocumentLength = ${minimumBsonDocumentLength};
 const maximumBsonFrameLength = ${maximumBsonFrameLength};
+const maximumTelemetryErrorNameLength = ${maximumTelemetryErrorNameLength};
+const maximumTelemetryErrorMessageLength = ${maximumTelemetryErrorMessageLength};
+const maximumTelemetryErrorStackLength = ${maximumTelemetryErrorStackLength};
+const maximumTelemetryErrorReportLength = ${maximumTelemetryErrorReportLength};
 
 const createAgentProgram = (console) => {
 ${agentProgramJavaScript}
@@ -143,24 +153,28 @@ export async function ${programEntrypointName}(channel) {
           return undefined;
         }
 
-        return async (input) => {
-          const id = String(nextToolCallId++);
-          const response = waitForToolResponse(id, property);
+        return (input) => {
+          const call = (async () => {
+            const id = String(nextToolCallId++);
+            const response = waitForToolResponse(id, property);
 
-          try {
-            await enqueueProgramMessage({
-              kind: "tool-call",
-              id,
-              name: property,
-              input,
-              stack: captureToolCallStack(),
-            });
-          } catch (error) {
-            pendingToolCalls.delete(id);
-            throw error;
-          }
+            try {
+              await enqueueProgramMessage({
+                kind: "tool-call",
+                id,
+                name: property,
+                input,
+                stack: captureToolCallStack(),
+              });
+            } catch (error) {
+              pendingToolCalls.delete(id);
+              throw error;
+            }
 
-          return await response;
+            return await response;
+          })();
+          void call.catch(() => {});
+          return call;
         };
       },
     }),
@@ -174,6 +188,9 @@ export async function ${programEntrypointName}(channel) {
     const result = await run(scope);
     if (result !== undefined) {
       throw new Error("Code-mode agent program must resolve to undefined");
+    }
+    if (pendingToolCalls.size > 0) {
+      throw new Error("Code-mode agent program must await every tool call before completing");
     }
 
     await writeQueue;
@@ -383,16 +400,21 @@ export async function ${programEntrypointName}(channel) {
   function serializeError(error) {
     if (error instanceof Error) {
       return {
-        name: error.name,
-        message: error.message,
-        stack: error.stack ?? null,
-        details: isErrorDetails(error.details) ? error.details : null,
+        name: truncateErrorField(error.name, maximumTelemetryErrorNameLength),
+        message: truncateErrorField(error.message, maximumTelemetryErrorMessageLength),
+        stack: error.stack === undefined
+          ? null
+          : truncateErrorField(error.stack, maximumTelemetryErrorStackLength),
+        details: serializeErrorDetails(error.details),
       };
     }
 
     return {
       name: "Error",
-      message: String(error),
+      message: truncateErrorField(
+        String(error),
+        maximumTelemetryErrorMessageLength,
+      ),
       stack: null,
       details: null,
     };
@@ -413,11 +435,32 @@ export async function ${programEntrypointName}(channel) {
     return value;
   }
 
-  function isErrorDetails(value) {
-    return value !== null
-      && typeof value === "object"
-      && value.kind === "tool-validation"
-      && typeof value.report === "string";
+  function serializeErrorDetails(value) {
+    if (
+      value === null
+      || typeof value !== "object"
+      || value.kind !== "tool-validation"
+      || typeof value.report !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      kind: "tool-validation",
+      report: truncateErrorField(
+        value.report,
+        maximumTelemetryErrorReportLength,
+      ),
+    };
+  }
+
+  function truncateErrorField(value, maximumLength) {
+    if (value.length <= maximumLength) {
+      return value;
+    }
+
+    const suffix = "... <truncated>";
+    return value.slice(0, maximumLength - suffix.length) + suffix;
   }
 }
 

@@ -89,13 +89,18 @@ async function executeInner(
     program,
     signal: req.signal,
   });
-  const runtimeFailure = new AbortController();
-  const toolSignal = AbortSignal.any([req.signal, runtimeFailure.signal]);
+  const toolCancellation = new AbortController();
+  const toolSignal = AbortSignal.any([req.signal, toolCancellation.signal]);
 
   try {
-    return await runRuntimeInstance(req, instance, toolSignal);
+    return await runRuntimeInstance(
+      req,
+      instance,
+      toolSignal,
+      toolCancellation,
+    );
   } catch (error) {
-    runtimeFailure.abort(error);
+    toolCancellation.abort(error);
     try {
       await instance.terminate("Code-mode execution failed");
     } catch (terminationError) {
@@ -113,6 +118,7 @@ async function runRuntimeInstance(
   req: ExecuteRequest,
   instance: Awaited<ReturnType<Runtime["start"]>>,
   toolSignal: AbortSignal,
+  toolCancellation: AbortController,
 ): Promise<ExecuteResult> {
   req.emitTelemetry({ kind: "runtime-started" });
   const pendingToolCalls = new Set<Promise<void>>();
@@ -219,6 +225,11 @@ async function runRuntimeInstance(
     }
 
     if (message.kind === "program-error") {
+      if (pendingToolCalls.size > 0) {
+        toolCancellation.abort(
+          new Error("Code-mode program failed while tool calls were still running"),
+        );
+      }
       await Promise.all(pendingToolCalls);
       await writeQueue;
       await instance.channel.outgoing.close();
@@ -233,6 +244,11 @@ async function runRuntimeInstance(
     }
 
     if (message.kind === "completed") {
+      if (pendingToolCalls.size > 0) {
+        toolCancellation.abort(
+          new Error("Code-mode program completed while tool calls were still running"),
+        );
+      }
       await Promise.all(pendingToolCalls);
       await writeQueue;
       await instance.channel.outgoing.close();

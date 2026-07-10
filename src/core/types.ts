@@ -157,7 +157,7 @@ export interface ObjectJsonSchema {
   readonly description?: string;
   readonly properties: Readonly<Record<string, SupportedJsonSchema>>;
   readonly required?: readonly string[];
-  readonly additionalProperties?: boolean | SupportedJsonSchema;
+  readonly additionalProperties: false;
 }
 
 export interface ArrayJsonSchema {
@@ -329,11 +329,10 @@ function assertObjectSchema(schema: Record<string, unknown>, context: string): v
   if (schema.required !== undefined && !Array.isArray(schema.required)) {
     throw new Error(`Code-mode schema ${context}.required must be an array`);
   }
-  if (
-    schema.additionalProperties !== undefined
-    && typeof schema.additionalProperties !== "boolean"
-  ) {
-    assertSupportedSchema(schema.additionalProperties, `${context}.additionalProperties`);
+  if (schema.additionalProperties !== false) {
+    throw new Error(
+      `Code-mode schema ${context}.additionalProperties must be false`,
+    );
   }
 
   const propertyNames = new Set(Object.keys(schema.properties));

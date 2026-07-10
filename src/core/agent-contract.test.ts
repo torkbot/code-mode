@@ -75,6 +75,7 @@ test("tool schemas type each side of input and output transformations", async ()
         value: { type: "string" },
       },
       required: ["value"],
+      additionalProperties: false,
     },
     {
       type: "object",
@@ -82,6 +83,7 @@ test("tool schemas type each side of input and output transformations", async ()
         value: { type: "number" },
       },
       required: ["value"],
+      additionalProperties: false,
     },
     (value) => {
       const input = value as { readonly value: string };
@@ -98,6 +100,7 @@ test("tool schemas type each side of input and output transformations", async ()
         value: { type: "number" },
       },
       required: ["value"],
+      additionalProperties: false,
     },
     {
       type: "object",
@@ -105,6 +108,7 @@ test("tool schemas type each side of input and output transformations", async ()
         formatted: { type: "string" },
       },
       required: ["formatted"],
+      additionalProperties: false,
     },
     (value) => {
       const output = value as { readonly value: number };
@@ -154,8 +158,8 @@ function objectSchema<T>(
   },
 ): StandardSchemaV1<T> & StandardJSONSchemaV1<T> {
   return schema<T, T>(
-    { type: "object", ...value },
-    { type: "object", ...value },
+    { type: "object", ...value, additionalProperties: false },
+    { type: "object", ...value, additionalProperties: false },
     (input) => ({ value: input as T }),
   );
 }

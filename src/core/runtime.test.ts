@@ -12,6 +12,7 @@ import type {
   RuntimeInstance,
   RuntimeProgramModule,
 } from "./runtime.ts";
+import { maximumTelemetryErrorMessageLength } from "./telemetry.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -150,6 +151,34 @@ test("generated programs reject oversized host frames before reading a payload",
   assert.equal(failure?.kind, "program-error");
   assert.match(failure.error.message, /exceeds the maximum/);
   assert.equal(outgoingClosed, true);
+});
+
+test("generated programs bound oversized errors into a program outcome", async () => {
+  const program = createProgram({
+    agentSource: `async () => { throw new Error("x".repeat(${maximumBsonFrameLength + 1})); }`,
+  });
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
+  const runtimeProgram = await import(moduleUrl) as RuntimeProgramModule;
+  const writes: Uint8Array[] = [];
+
+  await runtimeProgram.startProgram({
+    incoming: manyChunks([]),
+    outgoing: {
+      async write(chunk) {
+        writes.push(chunk);
+      },
+      async close() {},
+    },
+  });
+
+  const messages = [];
+  for await (const message of readProgramMessages(manyChunks(writes))) {
+    messages.push(message);
+  }
+  const failure = messages.find((message) => message.kind === "program-error");
+  assert.equal(failure?.kind, "program-error");
+  assert.equal(failure.error.message.length, maximumTelemetryErrorMessageLength);
+  assert.match(failure.error.message, /<truncated>$/);
 });
 
 test("public core source does not expose Node-specific contracts", async () => {

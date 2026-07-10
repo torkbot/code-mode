@@ -43,6 +43,28 @@ test("host-node runtime type definitions validate Node globals and node: imports
   assert.deepEqual(validation, { kind: "valid" });
 });
 
+test("host-node streams programs larger than process argument limits", async () => {
+  const runtime = await createHostNodeRuntime();
+  const instance = await runtime.start({
+    program: {
+      kind: "javascript-module",
+      source: [
+        "export async function startProgram(channel) {",
+        "  await channel.outgoing.close();",
+        "}",
+        `/* ${"x".repeat(900_000)} */`,
+      ].join("\n"),
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  for await (const _chunk of instance.channel.incoming) {
+    // Drain the child channel until the program exits.
+  }
+
+  assert.deepEqual(await instance.finished, { kind: "closed" });
+});
+
 function assertTypeDefinitionExists(
   files: readonly { readonly path: string }[],
   path: string,

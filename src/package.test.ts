@@ -153,7 +153,8 @@ test("runtime build and validation components do not write generated artifacts t
   assert.doesNotMatch(runtimeComponents, /\brm\(/);
   assert.doesNotMatch(runtimeComponents, /import .*writeFile/);
 
-  assert.match(hostNodeRuntime, /--eval/);
+  assert.doesNotMatch(hostNodeRuntime, /--eval/);
+  assert.match(hostNodeRuntime, /bootstrapWriter/);
   assert.match(nodeBootstrap, /data:text\/javascript;base64/);
   assert.match(sandboxNodeRuntime, /writeAndClose/);
   assert.match(validation, /new API/);

@@ -249,6 +249,26 @@ export function testRuntime(options: RuntimeTestOptions): void {
     );
   });
 
+  test(`${options.name}: completing with an unfinished tool call aborts the call`, async () => {
+    const runtime = await options.createRuntime();
+    const blocking = createBlockingToolbox();
+    const client = createClient({
+      runtime,
+      toolbox: blocking.toolbox,
+      environment: testEnvironment,
+    });
+
+    const result = client.run(
+      "async ({ codemode }) => { void codemode.block({}); }",
+      { signal: AbortSignal.timeout(5_000) },
+    ).result;
+
+    await blocking.started;
+    const outcome = await result;
+    assert.equal(outcome.kind, "program-failed");
+    assert.match(outcome.error.message, /must await every tool call/);
+  });
+
   test(`${options.name}: one client supports isolated concurrent executions`, async () => {
     const runtime = await options.createRuntime();
     const client = createClient({

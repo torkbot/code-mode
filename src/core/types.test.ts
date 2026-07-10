@@ -145,6 +145,25 @@ test("type generation rejects schemas it cannot represent honestly", () => {
       ]),
     /type must be a string/,
   );
+
+  const openObject = schemaWithJsonSchema({
+    type: "object",
+    properties: {},
+  });
+  assert.throws(
+    () => createToolbox([
+      defineTool(
+        "openObject",
+        {
+          description: "Use an open object schema.",
+          inputSchema: openObject,
+          outputSchema: openObject,
+        },
+        async (_ctx, value) => value,
+      ),
+    ]),
+    /additionalProperties must be false/,
+  );
 });
 
 function recordingSchema(

@@ -26,20 +26,23 @@ export class HostNodeRuntime implements Runtime {
   }
 
   async start(req: StartRequest): Promise<RuntimeInstance> {
-    const child = spawn(this.#nodePath, [
-      "--input-type=module",
-      "--eval",
-      createNodeBootstrapSource(req.program),
-    ], {
+    req.signal.throwIfAborted();
+
+    const child = spawn(this.#nodePath, ["--input-type=module"], {
       env: {
         ...process.env,
         [nodeChannelFdEnvironmentVariable]: String(nodeChannelFd),
       },
-      stdio: ["ignore", "ignore", "pipe", "pipe"],
+      stdio: ["pipe", "ignore", "pipe", "pipe"],
     });
 
     const fd3 = child.stdio[3];
     assertChannelStream(fd3);
+    const stdin = child.stdin;
+    if (stdin === null) {
+      child.kill("SIGTERM");
+      throw new Error("Host Node.js runtime did not create stdin");
+    }
 
     const channel: ByteChannel = {
       incoming: readableChunks(fd3),
@@ -102,6 +105,19 @@ export class HostNodeRuntime implements Runtime {
         });
       });
     });
+
+    try {
+      const bootstrapWriter = new NodeWritableByteWriter(stdin);
+      await bootstrapWriter.write(
+        Buffer.from(createNodeBootstrapSource(req.program), "utf8"),
+      );
+      await bootstrapWriter.close();
+    } catch (error) {
+      terminationRequested = true;
+      child.kill("SIGTERM");
+      await finished;
+      throw error;
+    }
 
     return {
       channel,

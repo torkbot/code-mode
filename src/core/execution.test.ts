@@ -62,8 +62,16 @@ test("execution terminates a live runtime when protocol processing fails", async
         "hold",
         {
           description: "Hold until the runtime protocol fails.",
-          inputSchema: testSchema({ type: "object", properties: {} }),
-          outputSchema: testSchema({ type: "object", properties: {} }),
+          inputSchema: testSchema({
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          }),
+          outputSchema: testSchema({
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          }),
         },
         async (ctx) => {
           toolSignal = ctx.signal;
