@@ -190,6 +190,25 @@ test("type generation rejects schemas it cannot represent honestly", () => {
     ]),
     /additionalProperties must be false/,
   );
+
+  const constrainedString = schemaWithJsonSchema({
+    type: "string",
+    enum: ["draft", "sent"],
+  });
+  assert.throws(
+    () => createToolbox([
+      defineTool(
+        "constrained",
+        {
+          description: "Use an unsupported string constraint.",
+          inputSchema: constrainedString,
+          outputSchema: constrainedString,
+        },
+        async (_ctx, value) => value,
+      ),
+    ]),
+    /unsupported keyword: enum/,
+  );
 });
 
 function recordingSchema(

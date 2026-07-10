@@ -6,6 +6,7 @@ import { validateAgentSource } from "./index.ts";
 const typeDefinitions = `interface Tools {
   getWeather(input: {
     readonly location: string;
+    readonly includeForecast?: boolean;
   }): Promise<{
     readonly conditions: string;
   }>;
@@ -105,4 +106,21 @@ test("agent source validation rejects syntax the runtime cannot erase", async ()
 
   assert.equal(failure?.kind, "typecheck");
   assert.match(failure.diagnostics[0]?.message ?? "", /erasableSyntaxOnly/);
+});
+
+test("agent source validation treats optional properties as absence-only", async () => {
+  const failure = await validateAgentSource({
+    signal: AbortSignal.timeout(5_000),
+    typeDefinitions,
+    typeDefinitionFiles: [],
+    source: `async ({ codemode }) => {
+      await codemode.getWeather({
+        location: "London",
+        includeForecast: undefined,
+      });
+    }`,
+  });
+
+  assert.equal(failure?.kind, "typecheck");
+  assert.match(failure.diagnostics[0]?.message ?? "", /exactOptionalPropertyTypes/);
 });

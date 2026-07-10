@@ -18,6 +18,8 @@ import {
 
 export { readNode24TypeDefinitions } from "./node24.ts";
 
+const maximumStderrLength = 64 * 1024;
+
 export class HostNodeRuntime implements Runtime {
   readonly #nodePath: string;
 
@@ -52,7 +54,7 @@ export class HostNodeRuntime implements Runtime {
     let stderr = "";
     child.stderr?.setEncoding("utf8");
     child.stderr?.on("data", (chunk: string) => {
-      stderr += chunk;
+      stderr = appendTextTail(stderr, chunk);
     });
 
     let terminationRequested = false;
@@ -130,6 +132,17 @@ export class HostNodeRuntime implements Runtime {
       },
     };
   }
+}
+
+function appendTextTail(current: string, chunk: string): string {
+  if (chunk.length >= maximumStderrLength) {
+    return chunk.slice(-maximumStderrLength);
+  }
+
+  const overflow = current.length + chunk.length - maximumStderrLength;
+  return overflow > 0
+    ? `${current.slice(overflow)}${chunk}`
+    : `${current}${chunk}`;
 }
 
 async function* readableChunks(readable: Readable): AsyncIterable<Uint8Array> {

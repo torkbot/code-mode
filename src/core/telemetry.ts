@@ -134,19 +134,24 @@ export function errorFromUnknown(
   error: unknown,
 ): TelemetryError {
   if (error instanceof Error) {
+    const stack = readErrorString(error, "stack", null);
     return {
       name: truncateTelemetryErrorField(
-        error.name,
+        readErrorString(error, "name", "Error") ?? "Error",
         maximumTelemetryErrorNameLength,
       ),
       message: truncateTelemetryErrorField(
-        error.message,
+        readErrorString(
+          error,
+          "message",
+          "Code-mode error message could not be read",
+        ) ?? "Code-mode error message could not be read",
         maximumTelemetryErrorMessageLength,
       ),
-      stack: error.stack === undefined
+      stack: stack === null
         ? null
         : truncateTelemetryErrorField(
-          error.stack,
+          stack,
           maximumTelemetryErrorStackLength,
         ),
       details: readErrorDetails(error),
@@ -156,7 +161,7 @@ export function errorFromUnknown(
   return {
     name: "Error",
     message: truncateTelemetryErrorField(
-      String(error),
+      stringifyUnknownError(error),
       maximumTelemetryErrorMessageLength,
     ),
     stack: null,
@@ -165,26 +170,58 @@ export function errorFromUnknown(
 }
 
 function readErrorDetails(error: Error): ErrorDetails | null {
-  const details = (error as { readonly details?: unknown }).details;
-
-  if (
-    typeof details !== "object"
-    || details === null
-    || !("kind" in details)
-    || details.kind !== "tool-validation"
-    || !("report" in details)
-    || typeof details.report !== "string"
-  ) {
+  let details: unknown;
+  try {
+    details = (error as { readonly details?: unknown }).details;
+  } catch {
     return null;
   }
 
-  return {
-    kind: "tool-validation",
-    report: truncateTelemetryErrorField(
-      details.report,
-      maximumTelemetryErrorReportLength,
-    ),
-  };
+  if (typeof details !== "object" || details === null) {
+    return null;
+  }
+
+  try {
+    if (
+      !("kind" in details)
+      || details.kind !== "tool-validation"
+      || !("report" in details)
+      || typeof details.report !== "string"
+    ) {
+      return null;
+    }
+
+    return {
+      kind: "tool-validation",
+      report: truncateTelemetryErrorField(
+        details.report,
+        maximumTelemetryErrorReportLength,
+      ),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function readErrorString(
+  error: Error,
+  property: "name" | "message" | "stack",
+  fallback: string | null,
+): string | null {
+  try {
+    const value = error[property];
+    return typeof value === "string" ? value : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function stringifyUnknownError(error: unknown): string {
+  try {
+    return String(error);
+  } catch {
+    return "Code-mode thrown value could not be serialized";
+  }
 }
 
 function truncateTelemetryErrorField(value: string, maximumLength: number): string {

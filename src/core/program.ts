@@ -143,7 +143,7 @@ export async function ${programEntrypointName}(channel) {
   let nextToolCallId = 0;
   const responses = readBsonFrames(channel.incoming)[Symbol.asyncIterator]();
   const pendingToolCalls = new Map();
-  const unobservedToolErrors = new Map();
+  const unobservedToolCalls = new Map();
   let responsePump;
   let writeQueue = Promise.resolve();
   const run = createAgentProgram(createProgramConsole(emitProgramLog));
@@ -192,8 +192,13 @@ export async function ${programEntrypointName}(channel) {
     if (pendingToolCalls.size > 0) {
       throw new Error("Code-mode agent program must await every tool call before completing");
     }
-    if (unobservedToolErrors.size > 0) {
-      throw unobservedToolErrors.values().next().value;
+    for (const unobservedError of unobservedToolCalls.values()) {
+      if (unobservedError !== undefined) {
+        throw unobservedError;
+      }
+    }
+    if (unobservedToolCalls.size > 0) {
+      throw new Error("Code-mode agent program must await every tool call before completing");
     }
 
     await writeQueue;
@@ -226,9 +231,10 @@ export async function ${programEntrypointName}(channel) {
 
   function trackToolCall(id, call) {
     let observed = false;
+    unobservedToolCalls.set(id, undefined);
     void call.catch((error) => {
       if (!observed) {
-        unobservedToolErrors.set(id, error);
+        unobservedToolCalls.set(id, error);
       }
     });
 
@@ -236,7 +242,7 @@ export async function ${programEntrypointName}(channel) {
       get(target, property) {
         if (property === "then" || property === "catch" || property === "finally") {
           observed = true;
-          unobservedToolErrors.delete(id);
+          unobservedToolCalls.delete(id);
           return target[property].bind(target);
         }
 
@@ -423,20 +429,31 @@ export async function ${programEntrypointName}(channel) {
 
   function serializeError(error) {
     if (error instanceof Error) {
+      const stack = readErrorString(error, "stack", null);
       return {
-        name: truncateErrorField(error.name, maximumTelemetryErrorNameLength),
-        message: truncateErrorField(error.message, maximumTelemetryErrorMessageLength),
-        stack: error.stack === undefined
+        name: truncateErrorField(
+          readErrorString(error, "name", "Error"),
+          maximumTelemetryErrorNameLength,
+        ),
+        message: truncateErrorField(
+          readErrorString(
+            error,
+            "message",
+            "Code-mode error message could not be read",
+          ),
+          maximumTelemetryErrorMessageLength,
+        ),
+        stack: stack === null
           ? null
-          : truncateErrorField(error.stack, maximumTelemetryErrorStackLength),
-        details: serializeErrorDetails(error.details),
+          : truncateErrorField(stack, maximumTelemetryErrorStackLength),
+        details: serializeErrorDetails(readErrorDetailsValue(error)),
       };
     }
 
     return {
       name: "Error",
       message: truncateErrorField(
-        String(error),
+        stringifyUnknownError(error),
         maximumTelemetryErrorMessageLength,
       ),
       stack: null,
@@ -460,22 +477,50 @@ export async function ${programEntrypointName}(channel) {
   }
 
   function serializeErrorDetails(value) {
-    if (
-      value === null
-      || typeof value !== "object"
-      || value.kind !== "tool-validation"
-      || typeof value.report !== "string"
-    ) {
+    if (value === null || typeof value !== "object") {
       return null;
     }
 
-    return {
-      kind: "tool-validation",
-      report: truncateErrorField(
-        value.report,
-        maximumTelemetryErrorReportLength,
-      ),
-    };
+    try {
+      if (value.kind !== "tool-validation" || typeof value.report !== "string") {
+        return null;
+      }
+
+      return {
+        kind: "tool-validation",
+        report: truncateErrorField(
+          value.report,
+          maximumTelemetryErrorReportLength,
+        ),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function readErrorDetailsValue(error) {
+    try {
+      return error.details;
+    } catch {
+      return null;
+    }
+  }
+
+  function readErrorString(error, property, fallback) {
+    try {
+      const value = error[property];
+      return typeof value === "string" ? value : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+
+  function stringifyUnknownError(error) {
+    try {
+      return String(error);
+    } catch {
+      return "Code-mode thrown value could not be serialized";
+    }
   }
 
   function truncateErrorField(value, maximumLength) {

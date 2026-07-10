@@ -70,6 +70,34 @@ test("sandbox-node observes a signal aborted during spawn", async () => {
   assert.deepEqual(await instance.finished, { kind: "closed" });
 });
 
+test("sandbox-node bounds stderr retained for process failures", async () => {
+  const runtime = new SandboxNodeRuntime({
+    sandbox: new HostBackedSandbox(),
+    nodePath: process.execPath,
+    cwd: process.cwd(),
+  });
+  const instance = await runtime.start({
+    program: {
+      kind: "javascript-module",
+      source: `export async function startProgram(channel) {
+        await channel.outgoing.close();
+        process.stderr.write("x".repeat(100_000) + "stderr sentinel");
+        process.exitCode = 7;
+      }`,
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  for await (const _chunk of instance.channel.incoming) {
+    // Drain the child channel until the program exits.
+  }
+
+  const finished = await instance.finished;
+  assert.equal(finished.kind, "failed");
+  assert.match(finished.error.message, /stderr sentinel/);
+  assert.ok(finished.error.message.length < 66_000);
+});
+
 class HostBackedSandbox implements SandboxNodeHost {
   spawn(
     command: string,

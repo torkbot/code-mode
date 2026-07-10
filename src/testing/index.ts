@@ -235,6 +235,45 @@ export function testRuntime(options: RuntimeTestOptions): void {
       { signal: AbortSignal.timeout(5_000) },
     ).result;
     assert.deepEqual(recovered, { kind: "success" });
+
+    const hostileError = await emptyClient.run(`async () => {
+      const error = new Error("hidden");
+      for (const property of ["name", "message", "stack", "details"]) {
+        Object.defineProperty(error, property, {
+          get() { throw new Error("hostile error getter"); },
+        });
+      }
+      throw error;
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    }).result;
+    assert.equal(hostileError.kind, "program-failed");
+    assert.equal(hostileError.error.name, "Error");
+    assert.equal(
+      hostileError.error.message,
+      "Code-mode error message could not be read",
+    );
+
+    const hostileThrownValue = await emptyClient.run(`async () => {
+      throw { toString() { throw new Error("hostile toString"); } };
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    }).result;
+    assert.equal(hostileThrownValue.kind, "program-failed");
+    assert.equal(
+      hostileThrownValue.error.message,
+      "Code-mode thrown value could not be serialized",
+    );
+
+    const hostileToolError = await failingClient.run(
+      "async ({ codemode }) => { await codemode.failHostile({}); }",
+      { signal: AbortSignal.timeout(5_000) },
+    ).result;
+    assert.equal(hostileToolError.kind, "program-failed");
+    assert.equal(
+      hostileToolError.error.message,
+      "Code-mode error message could not be read",
+    );
   });
 
   test(`${options.name}: telemetry is ordered and callback failures cannot alter execution`, async () => {
@@ -345,6 +384,25 @@ export function testRuntime(options: RuntimeTestOptions): void {
 
     assert.equal(outcome.kind, "program-failed");
     assert.equal(outcome.error.message, "unobserved tool failure");
+  });
+
+  test(`${options.name}: a completed unawaited tool call still fails the program`, async () => {
+    const runtime = await options.createRuntime();
+    const client = createClient({
+      runtime,
+      toolbox: createCompletedUnobservedToolbox(),
+      environment: testEnvironment,
+    });
+
+    const outcome = await client.run(`async ({ codemode }) => {
+      void codemode.complete({});
+      await codemode.waitForCompletion({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    }).result;
+
+    assert.equal(outcome.kind, "program-failed");
+    assert.match(outcome.error.message, /must await every tool call/);
   });
 
   test(`${options.name}: one client supports isolated concurrent executions`, async () => {
@@ -970,6 +1028,25 @@ function createFailingToolbox() {
         throw new Error("tool contract failure");
       },
     ),
+    defineTool(
+      "failHostile",
+      {
+        description: "Fail with unreadable Error fields.",
+        inputSchema: EmptyObject,
+        outputSchema: EmptyObject,
+      },
+      async () => {
+        const error = new Error("hidden");
+        for (const property of ["name", "message", "stack", "details"]) {
+          Object.defineProperty(error, property, {
+            get() {
+              throw new Error("hostile error getter");
+            },
+          });
+        }
+        throw error;
+      },
+    ),
   ]);
 }
 
@@ -997,6 +1074,36 @@ function createUnobservedFailureToolbox() {
       },
       async () => {
         await failureStarted.promise;
+        return {};
+      },
+    ),
+  ]);
+}
+
+function createCompletedUnobservedToolbox() {
+  const completed = createDeferred<void>();
+  return createToolbox([
+    defineTool(
+      "complete",
+      {
+        description: "Complete without being awaited.",
+        inputSchema: EmptyObject,
+        outputSchema: EmptyObject,
+      },
+      async () => {
+        completed.resolve();
+        return {};
+      },
+    ),
+    defineTool(
+      "waitForCompletion",
+      {
+        description: "Wait until the unawaited call has completed.",
+        inputSchema: EmptyObject,
+        outputSchema: EmptyObject,
+      },
+      async () => {
+        await completed.promise;
         return {};
       },
     ),

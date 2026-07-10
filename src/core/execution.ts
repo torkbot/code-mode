@@ -232,9 +232,14 @@ async function runRuntimeInstance(
           new Error("Code-mode program failed while tool calls were still running"),
         );
       }
-      await Promise.all(pendingToolCalls);
+      await Promise.allSettled(pendingToolCalls);
       await writeQueue;
-      await instance.channel.outgoing.close();
+      try {
+        await instance.channel.outgoing.close();
+      } catch {
+        // The program may have closed the channel after sending its terminal error.
+      }
+      await instance.terminate("Code-mode program failed");
       await assertRuntimeClosed(instance.finished, req.emitTelemetry);
 
       return {
@@ -251,9 +256,14 @@ async function runRuntimeInstance(
           new Error("Code-mode program completed while tool calls were still running"),
         );
       }
-      await Promise.all(pendingToolCalls);
+      await Promise.allSettled(pendingToolCalls);
       await writeQueue;
-      await instance.channel.outgoing.close();
+      try {
+        await instance.channel.outgoing.close();
+      } catch {
+        // The program may have closed the channel after sending completion.
+      }
+      await instance.terminate("Code-mode program completed");
       await assertRuntimeClosed(instance.finished, req.emitTelemetry);
 
       return {

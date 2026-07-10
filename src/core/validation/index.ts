@@ -165,6 +165,7 @@ function createTypecheckTsconfig(runtimeTypePaths: readonly string[]): string {
         lib: ["es2024"],
         strict: true,
         erasableSyntaxOnly: true,
+        exactOptionalPropertyTypes: true,
         noEmit: true,
         skipLibCheck: true,
       },

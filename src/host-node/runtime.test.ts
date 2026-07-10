@@ -65,6 +65,30 @@ test("host-node streams programs larger than process argument limits", async () 
   assert.deepEqual(await instance.finished, { kind: "closed" });
 });
 
+test("host-node bounds stderr retained for process failures", async () => {
+  const runtime = await createHostNodeRuntime();
+  const instance = await runtime.start({
+    program: {
+      kind: "javascript-module",
+      source: `export async function startProgram(channel) {
+        await channel.outgoing.close();
+        process.stderr.write("x".repeat(100_000) + "stderr sentinel");
+        process.exitCode = 7;
+      }`,
+    },
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  for await (const _chunk of instance.channel.incoming) {
+    // Drain the child channel until the program exits.
+  }
+
+  const finished = await instance.finished;
+  assert.equal(finished.kind, "failed");
+  assert.match(finished.error.message, /stderr sentinel/);
+  assert.ok(finished.error.message.length < 66_000);
+});
+
 function assertTypeDefinitionExists(
   files: readonly { readonly path: string }[],
   path: string,

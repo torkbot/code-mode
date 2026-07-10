@@ -309,26 +309,54 @@ function assertSupportedSchema(schema: unknown, context: string): SupportedJsonS
 
   switch (schema.type) {
     case "object":
+      assertSchemaKeywords(schema, context, [
+        "type",
+        "description",
+        "properties",
+        "required",
+        "additionalProperties",
+      ]);
       assertObjectSchema(schema, context);
       return schema as unknown as ObjectJsonSchema;
     case "array":
+      assertSchemaKeywords(schema, context, ["type", "description", "items"]);
       assertSupportedSchema(schema.items, `${context}.items`);
       return schema as unknown as ArrayJsonSchema;
     case "string":
+      assertSchemaKeywords(schema, context, ["type", "description", "format"]);
       if (schema.format !== undefined && typeof schema.format !== "string") {
         throw new Error(`Code-mode schema ${context}.format must be a string`);
       }
       return schema as unknown as StringJsonSchema;
     case "number":
+      assertSchemaKeywords(schema, context, ["type", "description"]);
       return schema as unknown as NumberJsonSchema;
     case "integer":
+      assertSchemaKeywords(schema, context, ["type", "description"]);
       return schema as unknown as IntegerJsonSchema;
     case "boolean":
+      assertSchemaKeywords(schema, context, ["type", "description"]);
       return schema as unknown as BooleanJsonSchema;
     case "null":
+      assertSchemaKeywords(schema, context, ["type", "description"]);
       return schema as unknown as NullJsonSchema;
     default:
       throw new Error(`Code-mode schema ${context} uses unsupported type: ${schema.type}`);
+  }
+}
+
+function assertSchemaKeywords(
+  schema: Record<string, unknown>,
+  context: string,
+  supportedKeywords: readonly string[],
+): void {
+  const supported = new Set(supportedKeywords);
+  for (const keyword of Object.keys(schema)) {
+    if (!supported.has(keyword)) {
+      throw new Error(
+        `Code-mode schema ${context} uses unsupported keyword: ${keyword}`,
+      );
+    }
   }
 }
 

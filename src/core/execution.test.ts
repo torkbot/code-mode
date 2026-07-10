@@ -104,6 +104,122 @@ test("execution terminates a live runtime when protocol processing fails", async
   assert.deepEqual(await finished, { kind: "closed" });
 });
 
+test("a terminal program error survives failed writes from canceled tool calls", async () => {
+  const toolCall = encodeProgramMessage({
+    kind: "tool-call",
+    id: "call-1",
+    name: "hold",
+    input: {},
+    stack: "Error: Tool call stack",
+  });
+  const programError = encodeProgramMessage({
+    kind: "program-error",
+    error: {
+      name: "Error",
+      message: "agent failed",
+      stack: null,
+      details: null,
+    },
+  });
+  let finishRuntime: ((result: RuntimeFinished) => void) | undefined;
+  const finished = new Promise<RuntimeFinished>((resolve) => {
+    finishRuntime = resolve;
+  });
+  const runtime: Runtime = {
+    async start() {
+      return {
+        channel: {
+          incoming: fromChunks([toolCall, programError]),
+          outgoing: {
+            async write() {
+              throw new Error("runtime channel is closed");
+            },
+            async close() {
+              throw new Error("runtime channel is already closed");
+            },
+          },
+        },
+        finished,
+        async terminate() {
+          finishRuntime?.({ kind: "closed" });
+        },
+      };
+    },
+  };
+  const client = createClient({
+    runtime,
+    toolbox: createToolbox([
+      defineTool(
+        "hold",
+        {
+          description: "Fail when the program terminates.",
+          inputSchema: testSchema({
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          }),
+          outputSchema: testSchema({
+            type: "object",
+            properties: {},
+            additionalProperties: false,
+          }),
+        },
+        async (ctx) => {
+          ctx.signal.throwIfAborted();
+          return {};
+        },
+      ),
+    ]),
+    environment: {
+      description: "Terminal program-error test environment.",
+      typeDefinitionFiles: [],
+    },
+  });
+
+  const outcome = await client.run("async () => {}").result;
+
+  assert.equal(outcome.kind, "program-failed");
+  assert.equal(outcome.error.message, "agent failed");
+});
+
+test("execution terminates a runtime after a completed protocol message", async () => {
+  let terminateReason: string | undefined;
+  let finishRuntime: ((result: RuntimeFinished) => void) | undefined;
+  const finished = new Promise<RuntimeFinished>((resolve) => {
+    finishRuntime = resolve;
+  });
+  const runtime: Runtime = {
+    async start() {
+      return {
+        channel: {
+          incoming: fromChunks([encodeProgramMessage({ kind: "completed" })]),
+          outgoing: {
+            async write() {},
+            async close() {},
+          },
+        },
+        finished,
+        async terminate(reason) {
+          terminateReason = reason;
+          finishRuntime?.({ kind: "closed" });
+        },
+      };
+    },
+  };
+  const client = createClient({
+    runtime,
+    toolbox: createToolbox([]),
+    environment: {
+      description: "Terminal completion test environment.",
+      typeDefinitionFiles: [],
+    },
+  });
+
+  assert.deepEqual(await client.run("async () => {}").result, { kind: "success" });
+  assert.equal(terminateReason, "Code-mode program completed");
+  assert.deepEqual(await finished, { kind: "closed" });
+});
+
 function encodeRawBsonFrame(document: Record<string, unknown>): Uint8Array {
   const frame = BSON.serialize(document);
   const packet = new Uint8Array(4 + frame.byteLength);

@@ -12,6 +12,8 @@ import {
   nodeChannelFdEnvironmentVariable,
 } from "../node-runtime/bootstrap.ts";
 
+const maximumStderrLength = 64 * 1024;
+
 export interface SandboxNodeRuntimeOptions {
   readonly sandbox: SandboxNodeHost;
   readonly nodePath: string;
@@ -197,9 +199,20 @@ async function readText(stream: ReadableStream<Uint8Array>): Promise<string> {
   const decoder = new TextDecoder();
   let result = "";
   for await (const chunk of readableChunks(stream)) {
-    result += decoder.decode(chunk, { stream: true });
+    result = appendTextTail(result, decoder.decode(chunk, { stream: true }));
   }
-  return result + decoder.decode();
+  return appendTextTail(result, decoder.decode());
+}
+
+function appendTextTail(current: string, chunk: string): string {
+  if (chunk.length >= maximumStderrLength) {
+    return chunk.slice(-maximumStderrLength);
+  }
+
+  const overflow = current.length + chunk.length - maximumStderrLength;
+  return overflow > 0
+    ? `${current.slice(overflow)}${chunk}`
+    : `${current}${chunk}`;
 }
 
 function formatProcessFailure(
