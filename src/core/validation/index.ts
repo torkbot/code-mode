@@ -32,7 +32,7 @@ const maxReportLineLength = 160;
 const maxReportLength = 8_000;
 
 const projectRoot = "/__code_mode__";
-const agentFile = `${projectRoot}/agent.ts`;
+const agentFile = `${projectRoot}/agent.mts`;
 const typesFile = `${projectRoot}/codemode.d.ts`;
 const tsconfigFile = `${projectRoot}/tsconfig.json`;
 const agentSourceLineOffset = 2;
@@ -174,7 +174,7 @@ function createTypecheckTsconfig(runtimeTypePaths: readonly string[]): string {
         noEmit: true,
         skipLibCheck: true,
       },
-      files: ["agent.ts", "codemode.d.ts", ...runtimeTypePaths],
+      files: ["agent.mts", "codemode.d.ts", ...runtimeTypePaths],
     },
     null,
     2,

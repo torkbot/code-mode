@@ -131,6 +131,9 @@ export class HostNodeRuntime implements Runtime {
     } catch (error) {
       requestTermination();
       await finished;
+      if (req.signal.aborted) {
+        throw req.signal.reason;
+      }
       throw error;
     }
 

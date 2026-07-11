@@ -155,6 +155,20 @@ test("host-node rejects writes when the child closes its pipe", {
   );
 });
 
+test("host-node reports cancellation while streaming the bootstrap", async () => {
+  const controller = new AbortController();
+  const reason = new Error("bootstrap cancelled");
+  const runtime = new HostNodeRuntime(process.execPath);
+  const start = runtime.start({
+    program: { source: "x".repeat(16 * 1024 * 1024) },
+    signal: controller.signal,
+  });
+
+  controller.abort(reason);
+
+  await assert.rejects(start, (error) => error === reason);
+});
+
 function assertTypeDefinitionExists(
   files: readonly { readonly path: string }[],
   path: string,

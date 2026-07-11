@@ -45,6 +45,17 @@ test("agent source validation accepts code that matches generated code-mode type
   assert.equal(failure, undefined);
 });
 
+test("agent source validation checks the program as ESM", async () => {
+  const failure = await validateAgentSource({
+    signal: AbortSignal.timeout(5_000),
+    typeDefinitions,
+    typeDefinitionFiles: [],
+    source: `async () => { void import.meta; }`,
+  });
+
+  assert.equal(failure, undefined);
+});
+
 test("agent source validation returns serializable diagnostics for type errors", async () => {
   const failure = await validateAgentSource({
     signal: AbortSignal.timeout(5_000),
@@ -144,11 +155,11 @@ test("agent source validation rejects runtime type path collisions", async () =>
       signal: AbortSignal.timeout(5_000),
       typeDefinitions,
       typeDefinitionFiles: [
-        { path: "agent.ts", contents: "async () => {};" },
+        { path: "agent.mts", contents: "async () => {};" },
       ],
       source: "async () => {}",
     }),
-    /path collides with another validation file: agent\.ts/,
+    /path collides with another validation file: agent\.mts/,
   );
 
   await assert.rejects(

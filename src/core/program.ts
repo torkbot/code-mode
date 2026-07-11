@@ -330,26 +330,30 @@ export async function startProgram(channel) {
   }
 
   function serializeConsoleValue(value) {
+    const marker = crypto.randomUUID();
+    const encodeValue = (_key, nested) => encodeConsoleValue(marker, nested);
     try {
       return {
         format: "flatted",
-        value: flattedStringify(value, encodeConsoleValue),
+        value: flattedStringify({ marker, value }, encodeValue),
       };
     } catch (error) {
       return {
         format: "flatted",
-        value: flattedStringify({
+        value: flattedStringify({ marker, value: {
           $type: "serialization-error",
+          marker,
           error: serializeError(error),
-        }, encodeConsoleValue),
+        } }, encodeValue),
       };
     }
   }
 
-  function encodeConsoleValue(_key, value) {
+  function encodeConsoleValue(marker, value) {
     if (value instanceof Error) {
       return {
         $type: "error",
+        marker,
         name: value.name,
         message: value.message,
         stack: value.stack ?? null,
@@ -359,6 +363,7 @@ export async function startProgram(channel) {
     if (typeof value === "bigint") {
       return {
         $type: "bigint",
+        marker,
         value: String(value),
       };
     }
@@ -366,6 +371,7 @@ export async function startProgram(channel) {
     if (typeof value === "function") {
       return {
         $type: "function",
+        marker,
         name: value.name || null,
       };
     }
@@ -373,6 +379,7 @@ export async function startProgram(channel) {
     if (typeof value === "symbol") {
       return {
         $type: "symbol",
+        marker,
         value: String(value),
       };
     }
@@ -380,6 +387,7 @@ export async function startProgram(channel) {
     if (typeof value === "undefined") {
       return {
         $type: "undefined",
+        marker,
       };
     }
 

@@ -45,7 +45,7 @@ export async function execute(req: ExecuteRequest): Promise<RunOutcome> {
     const result = await executeInner(req);
     req.emitTelemetry({
       kind: "execution-completed",
-      outcome: result,
+      outcome: structuredClone(result),
     });
     return result;
   } catch (error) {
@@ -430,10 +430,18 @@ function decodeProgramTelemetryEvent(
 }
 
 function decodeConsoleValue(value: SerializedConsoleValue): unknown {
-  return reviveConsoleValue(parseFlatted(value.value));
+  const envelope = parseFlatted(value.value) as {
+    readonly marker: string;
+    readonly value: unknown;
+  };
+  return reviveConsoleValue(envelope.value, envelope.marker);
 }
 
-function reviveConsoleValue(value: unknown, seen = new WeakSet<object>()): unknown {
+function reviveConsoleValue(
+  value: unknown,
+  marker: string,
+  seen = new WeakSet<object>(),
+): unknown {
   if (typeof value !== "object" || value === null) {
     return value;
   }
@@ -442,7 +450,7 @@ function reviveConsoleValue(value: unknown, seen = new WeakSet<object>()): unkno
   }
   seen.add(value);
 
-  if ("$type" in value) {
+  if ("$type" in value && "marker" in value && value.marker === marker) {
     if (value.$type === "undefined") {
       return undefined;
     }
@@ -470,7 +478,7 @@ function reviveConsoleValue(value: unknown, seen = new WeakSet<object>()): unkno
   }
 
   for (const [key, nested] of Object.entries(value)) {
-    Reflect.set(value, key, reviveConsoleValue(nested, seen));
+    Reflect.set(value, key, reviveConsoleValue(nested, marker, seen));
   }
   return value;
 }

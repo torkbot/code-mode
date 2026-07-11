@@ -631,6 +631,9 @@ export function testRuntime(options: {
         if (event.kind === "tool-call-started") {
           (event.input as { label: string }).label = "mutated by telemetry";
         }
+        if (event.kind === "execution-completed") {
+          Reflect.set(event.outcome, "telemetryAnnotation", true);
+        }
       },
     });
     let resultSettled = false;
@@ -653,6 +656,7 @@ export function testRuntime(options: {
     assert.ok(programLog.values[4] instanceof Error);
     assert.equal(programLog.values[4].message, "logged failure");
     assert.deepEqual(programLog.values[5], { $type: "bigint", value: "abc" });
+    assert.deepEqual(programLog.values[6], { $type: "undefined" });
     assert.equal(resultSettled, false);
 
     const toolStarted = await telemetry.next("tool-call-started");
@@ -669,7 +673,10 @@ export function testRuntime(options: {
     assert.deepEqual(await result, { kind: "success" });
 
     const completed = await telemetry.next("execution-completed");
-    assert.deepEqual(completed.outcome, { kind: "success" });
+    assert.deepEqual(completed.outcome, {
+      kind: "success",
+      telemetryAnnotation: true,
+    });
   });
 }
 
@@ -1197,6 +1204,7 @@ const telemetryAgentProgram: AgentProgram<TelemetryApi> = async ({
     1n,
     new Error("logged failure"),
     { $type: "bigint", value: "abc" },
+    { $type: "undefined" },
   );
   await codemode.waitForRelease({ label: "gate" });
 };
