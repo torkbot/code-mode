@@ -83,6 +83,7 @@ async function executeInner(
   const toolSignal = AbortSignal.any([req.signal, toolCancellation.signal]);
 
   try {
+    req.signal.throwIfAborted();
     return await runRuntimeInstance(
       req,
       instance,
@@ -329,7 +330,9 @@ function formatToolValidationReport(req: {
 
 function formatToolCallExcerpt(source: string, toolName: string): readonly string[] {
   const lines = source.split("\n");
-  const pattern = new RegExp(`\\bcodemode\\s*\\.\\s*${toolName}\\b`);
+  const pattern = new RegExp(
+    `\\bcodemode\\s*\\.\\s*${escapeRegExp(toolName)}(?![$\\w])`,
+  );
   const index = lines.findIndex((line) => pattern.test(line));
 
   if (index === -1) {
@@ -353,6 +356,10 @@ function formatToolCallExcerpt(source: string, toolName: string): readonly strin
   }
 
   return frame;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function formatStandardSchemaPath(

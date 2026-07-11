@@ -351,6 +351,43 @@ test("execution rejects completion while a tool call is pending", async () => {
   );
 });
 
+test("execution honors cancellation that occurs while the runtime starts", async () => {
+  const controller = new AbortController();
+  let terminated = false;
+  const runtime: Runtime = {
+    async start() {
+      controller.abort(new Error("cancel during runtime start"));
+      return {
+        channel: {
+          incoming: fromChunks([]),
+          outgoing: {
+            async write() {},
+            async close() {},
+          },
+        },
+        finished: Promise.resolve({ kind: "closed" }),
+        async terminate() {
+          terminated = true;
+        },
+      };
+    },
+  };
+  const client = createClient({
+    runtime,
+    toolbox: createToolbox([]),
+    environment: {
+      description: "Runtime start cancellation test environment.",
+      typeDefinitionFiles: [],
+    },
+  });
+
+  await assert.rejects(
+    client.run("async () => {}", { signal: controller.signal }),
+    /cancel during runtime start/,
+  );
+  assert.equal(terminated, true);
+});
+
 function encodeRawBsonFrame(document: Record<string, unknown>): Uint8Array {
   const frame = BSON.serialize(document);
   const packet = new Uint8Array(4 + frame.byteLength);

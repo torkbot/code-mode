@@ -523,6 +523,21 @@ export function testRuntime(options: {
     assert.match(report, /codemode\.listFlights/);
     assert.match(report, /not-a-date/);
     assert.doesNotMatch(report, /Agent call stack:/);
+
+    const dollarClient = createClient({
+      runtime,
+      toolbox: dollarNamedFlightSearchToolbox,
+      environment: testEnvironment,
+    });
+    const dollarOutcome = await dollarClient.run(`async ({ codemode }) => {
+      await codemode.$lookup({ departureDate: "not-a-date" });
+    }`, { signal: AbortSignal.timeout(5_000) });
+    assert.equal(dollarOutcome.kind, "program-failed");
+    assert.match(dollarOutcome.error.details?.report ?? "", /codemode\.\$lookup/);
+    assert.doesNotMatch(
+      dollarOutcome.error.details?.report ?? "",
+      /tool call location unavailable/,
+    );
   });
 
   test(`${options.name}: client.run validates tool output values`, async () => {
@@ -817,6 +832,18 @@ const invalidFlightOutputToolbox = createToolbox([
     async () => {
       return {} as never;
     },
+  ),
+]);
+
+const dollarNamedFlightSearchToolbox = createToolbox([
+  defineTool(
+    "$lookup",
+    {
+      description: "Look up flights.",
+      inputSchema: FlightSearchInput,
+      outputSchema: FlightSearchOutput,
+    },
+    async () => ({ flights: [] }),
   ),
 ]);
 

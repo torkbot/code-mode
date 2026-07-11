@@ -25,8 +25,10 @@ import {
   createToolbox,
   defineTool,
 } from "@torkbot/code-mode";
-import { HostNodeRuntime } from "@torkbot/code-mode/host-node";
-import { readNode24TypeDefinitions } from "@torkbot/code-mode/host-node/node24";
+import {
+  HostNodeRuntime,
+  readNode24TypeDefinitions,
+} from "@torkbot/code-mode/host-node";
 
 const toolbox = createToolbox([
   defineTool(
