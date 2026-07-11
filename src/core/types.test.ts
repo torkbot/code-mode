@@ -66,7 +66,8 @@ test("declarations include schema annotations", () => {
   assert.match(toolbox.typeDefinitions, /readonly includeForecast\?: boolean/);
   assert.match(toolbox.typeDefinitions, /readonly temperature: number/);
   assert.match(toolbox.typeDefinitions, /@format date-time/);
-  assert.match(toolbox.typeDefinitions, /declare const console: Console/);
+  assert.match(toolbox.typeDefinitions, /interface CodeModeConsole/);
+  assert.doesNotMatch(toolbox.typeDefinitions, /declare const console/);
   assert.match(toolbox.typeDefinitions, /log\(\.\.\.values: unknown\[\]\): void/);
   assert.match(toolbox.typeDefinitions, /type AgentProgram/);
 });
@@ -91,7 +92,7 @@ test("empty closed object schemas require an object with no keys", () => {
 
   assert.match(
     toolbox.typeDefinitions,
-    /ping\(input: Record<string, never>\): Promise<Record<string, never>>/,
+    /ping<const Input extends Record<string, never>>\(input: Exact<Record<string, never>, Input>\): Promise<Record<string, never>>/,
   );
 });
 
@@ -137,8 +138,8 @@ test("toolbox rejects invalid names, duplicate names, and empty descriptions", (
   };
   const explicitlyNamed = defineTool("right", reusedDefinition, async () => ({}));
   assert.equal(explicitlyNamed.name, "right");
-  assert.match(createToolbox([explicitlyNamed]).typeDefinitions, /right\(input:/);
-  assert.doesNotMatch(createToolbox([explicitlyNamed]).typeDefinitions, /wrong\(input:/);
+  assert.match(createToolbox([explicitlyNamed]).typeDefinitions, /right<const Input extends/);
+  assert.doesNotMatch(createToolbox([explicitlyNamed]).typeDefinitions, /wrong<const Input extends/);
 
   assert.throws(
     () => createToolbox([

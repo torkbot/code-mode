@@ -35,7 +35,7 @@ export function testRuntime(options: {
     ]);
     const client = createClient({ runtime, toolbox, environment: testEnvironment });
 
-    assert.match(toolbox.typeDefinitions, /label\(input:/);
+    assert.match(toolbox.typeDefinitions, /label<const Input extends/);
     assert.match(
       toolbox.typeDefinitions,
       /type AgentProgram/,
@@ -128,6 +128,13 @@ export function testRuntime(options: {
     assert.equal(unknown.kind, "invalid");
     assert.match(unknown.report, /notRegistered/);
 
+    const extraInput = await client.validate(`async ({ codemode }) => {
+      const request = { location: "London", extra: true };
+      await codemode.getWeather(request);
+    }`, AbortSignal.timeout(5_000));
+    assert.equal(extraInput.kind, "invalid");
+    assert.match(extraInput.report, /extra/);
+
     const manyErrors = await client.validate(`async ({ codemode }) => {
       ${Array.from({ length: 20 }, (_, index) => (
         `await codemode.getWeather({ location: ${index} });`
@@ -162,7 +169,7 @@ export function testRuntime(options: {
     }`;
     assert.match(
       toolbox.typeDefinitions,
-      /transform\(input: \{[\s\S]*value: string[\s\S]*Promise<\{[\s\S]*formatted: string/,
+      /transform<const Input extends \{[\s\S]*value: string[\s\S]*Promise<\{[\s\S]*formatted: string/,
     );
 
     assert.deepEqual(
@@ -397,6 +404,16 @@ export function testRuntime(options: {
 
     assert.equal(methodRead.kind, "program-failed");
     assert.equal(methodRead.error.message, "unobserved tool failure");
+
+    const derivedPromise = await client.run(`async ({ codemode }) => {
+      void codemode.fail({}).then(() => {});
+      await codemode.waitForFailure({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    assert.equal(derivedPromise.kind, "program-failed");
+    assert.equal(derivedPromise.error.message, "unobserved tool failure");
   });
 
   test(`${options.name}: client runs an agent program against toolbox tools`, async () => {
@@ -595,6 +612,10 @@ export function testRuntime(options: {
     };
     assert.equal(loggedPayload.label, "gate");
     assert.equal(loggedPayload.self, loggedPayload);
+    assert.equal(programLog.values[2], undefined);
+    assert.equal(programLog.values[3], 1n);
+    assert.ok(programLog.values[4] instanceof Error);
+    assert.equal(programLog.values[4].message, "logged failure");
     assert.equal(resultSettled, false);
 
     const toolStarted = await telemetry.next("tool-call-started");
@@ -1132,7 +1153,7 @@ const telemetryAgentProgram: AgentProgram<TelemetryApi> = async ({
     enumerable: true,
     value: payload,
   });
-  console.log("about to wait", payload);
+  console.log("about to wait", payload, undefined, 1n, new Error("logged failure"));
   await codemode.waitForRelease({ label: "gate" });
 };
 

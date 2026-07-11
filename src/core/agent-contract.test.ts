@@ -147,7 +147,7 @@ test("tool schemas type each side of input and output transformations", async ()
   const toolbox = createToolbox([tool]);
   assert.match(
     toolbox.typeDefinitions,
-    /transform\(input: \{[\s\S]*value: string[\s\S]*Promise<\{[\s\S]*formatted: string/,
+    /transform<const Input extends \{[\s\S]*value: string[\s\S]*Promise<\{[\s\S]*formatted: string/,
   );
 });
 

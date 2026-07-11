@@ -144,9 +144,9 @@ function toVirtualRuntimeTypePath(path: string): string {
 function createAgentTypecheckSource(source: string): string {
   return [
     `/// <reference path="./codemode.d.ts" />`,
-    `const program: AgentProgram = (`,
+    `const program: AgentProgram = (() => { const console: CodeModeConsole = undefined as never; const submitted: AgentProgram = (`,
     source,
-    `);`,
+    `); return submitted; })();`,
     `void program;`,
     "",
   ].join("\n");

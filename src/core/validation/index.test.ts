@@ -3,7 +3,15 @@ import test from "node:test";
 
 import { validateAgentSource } from "./index.ts";
 
-const typeDefinitions = `interface Tools {
+const typeDefinitions = `interface CodeModeConsole {
+  debug(...values: unknown[]): void;
+  error(...values: unknown[]): void;
+  info(...values: unknown[]): void;
+  log(...values: unknown[]): void;
+  warn(...values: unknown[]): void;
+}
+
+interface Tools {
   getWeather(input: {
     readonly location: string;
     readonly includeForecast?: boolean;

@@ -206,7 +206,10 @@ export async function startProgram(channel) {
           return (...args) => {
             observed = true;
             unobservedToolCalls.delete(id);
-            return target[property](...args);
+            const derived = target[property](...args);
+            return property === "then" && typeof args[1] === "function"
+              ? derived
+              : trackToolCall(id, derived);
           };
         }
 

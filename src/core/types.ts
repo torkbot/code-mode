@@ -210,7 +210,7 @@ export function generateTypes(req: TypeGenerationRequest): string {
   const methods = tools.map(printTool);
 
   return [
-    `interface Console {`,
+    `interface CodeModeConsole {`,
     `  debug(...values: unknown[]): void;`,
     `  error(...values: unknown[]): void;`,
     `  info(...values: unknown[]): void;`,
@@ -218,7 +218,15 @@ export function generateTypes(req: TypeGenerationRequest): string {
     `  warn(...values: unknown[]): void;`,
     `}`,
     ``,
-    `declare const console: Console;`,
+    `type Exact<Expected, Actual> = Actual extends Expected`,
+    `  ? Actual extends readonly unknown[]`,
+    `    ? Expected extends ReadonlyArray<infer Item>`,
+    `      ? { readonly [Key in keyof Actual]: Exact<Item, Actual[Key]> }`,
+    `      : never`,
+    `    : Actual extends object`,
+    `      ? { readonly [Key in keyof Actual]: Key extends keyof Expected ? Exact<Expected[Key], Actual[Key]> : never }`,
+    `      : Actual`,
+    `  : Expected;`,
     ``,
     `interface Tools {`,
     joinBlocks(methods),
@@ -411,9 +419,12 @@ function assertObjectSchema(schema: Record<string, unknown>, context: string): v
 function printTool(tool: AgentToolDefinition): string {
   const inputType = printType(tool.inputSchema, "  ");
   const outputType = printType(tool.outputSchema, "  ");
+  const signature = tool.inputSchema.type === "object"
+    ? `  ${tool.name}<const Input extends ${inputType}>(input: Exact<${inputType}, Input>): Promise<${outputType}>;`
+    : `  ${tool.name}(input: ${inputType}): Promise<${outputType}>;`;
   return [
     ...printJSDoc("  ", toolDescriptionLines(tool)),
-    `  ${tool.name}(input: ${inputType}): Promise<${outputType}>;`,
+    signature,
   ].join("\n");
 }
 

@@ -430,5 +430,43 @@ function decodeProgramTelemetryEvent(
 }
 
 function decodeConsoleValue(value: SerializedConsoleValue): unknown {
-  return parseFlatted(value.value);
+  return reviveConsoleValue(parseFlatted(value.value));
+}
+
+function reviveConsoleValue(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (typeof value !== "object" || value === null) {
+    return value;
+  }
+  if (seen.has(value)) {
+    return value;
+  }
+  seen.add(value);
+
+  if ("$type" in value) {
+    if (value.$type === "undefined") {
+      return undefined;
+    }
+    if (value.$type === "bigint" && "value" in value && typeof value.value === "string") {
+      return BigInt(value.value);
+    }
+    if (
+      value.$type === "error"
+      && "name" in value
+      && typeof value.name === "string"
+      && "message" in value
+      && typeof value.message === "string"
+    ) {
+      const error = new Error(value.message);
+      error.name = value.name;
+      if ("stack" in value && typeof value.stack === "string") {
+        error.stack = value.stack;
+      }
+      return error;
+    }
+  }
+
+  for (const [key, nested] of Object.entries(value)) {
+    Reflect.set(value, key, reviveConsoleValue(nested, seen));
+  }
+  return value;
 }
