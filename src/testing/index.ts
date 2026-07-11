@@ -340,7 +340,7 @@ export function testRuntime(options: {
     );
     await blocking.started;
     during.abort(new Error("cancel during execution"));
-    await assert.rejects(execution);
+    await assert.rejects(execution, /cancel during execution/);
 
     assert.deepEqual(
       await client.run("async () => {}", {

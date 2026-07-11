@@ -84,8 +84,8 @@ export function defineTool<
   execute: ToolHandler<InputSchema, OutputSchema>,
 ): ExecutableToolDefinition<Name, InputSchema, OutputSchema> {
   return {
-    name,
     ...definition,
+    name,
     execute,
     [executableToolDefinitionBrand]: {
       inputSchema: definition.inputSchema,
@@ -112,6 +112,9 @@ export function createToolbox(tools: readonly ExecutableToolDefinition[]): Toolb
     assertNonEmptyString(tool.description, `tool ${tool.name} description`);
     assertToolSchema(tool.inputSchema, `tool ${tool.name} inputSchema`);
     assertToolSchema(tool.outputSchema, `tool ${tool.name} outputSchema`);
+    if (typeof tool.execute !== "function") {
+      throw new Error(`Code-mode tool ${tool.name} execute must be a function`);
+    }
 
     if (Object.hasOwn(byName, tool.name)) {
       throw new Error(`Code-mode tool names must be unique: ${tool.name}`);

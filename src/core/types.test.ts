@@ -129,6 +129,16 @@ test("toolbox rejects invalid names, duplicate names, and empty descriptions", (
     { description: "Look up a value.", inputSchema: schema, outputSchema: schema },
     async () => ({}),
   );
+  const reusedDefinition = {
+    name: "wrong",
+    description: "Keep the explicit name.",
+    inputSchema: schema,
+    outputSchema: schema,
+  };
+  const explicitlyNamed = defineTool("right", reusedDefinition, async () => ({}));
+  assert.equal(explicitlyNamed.name, "right");
+  assert.match(createToolbox([explicitlyNamed]).typeDefinitions, /right\(input:/);
+  assert.doesNotMatch(createToolbox([explicitlyNamed]).typeDefinitions, /wrong\(input:/);
 
   assert.throws(
     () => createToolbox([
@@ -164,6 +174,12 @@ test("toolbox rejects invalid names, duplicate names, and empty descriptions", (
       ),
     ]),
     /description must be a non-empty string/,
+  );
+  assert.throws(
+    () => createToolbox([
+      { ...valid, execute: null } as unknown as typeof valid,
+    ]),
+    /execute must be a function/,
   );
 });
 

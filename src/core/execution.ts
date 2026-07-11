@@ -273,6 +273,7 @@ async function runRuntimeInstance(
   }
 
   await assertRuntimeClosed(instance.finished);
+  req.signal.throwIfAborted();
 
   throw new Error("Code-mode execution finished without producing an outcome");
 }
