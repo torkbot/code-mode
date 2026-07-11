@@ -228,7 +228,7 @@ test("execution terminates a runtime after a completed protocol message", async 
   assert.deepEqual(await finished, { kind: "closed" });
 });
 
-test("tool completion telemetry requires a delivered response", async () => {
+test("failed tool response writes reject without completion telemetry", async () => {
   const toolCall = encodeProgramMessage({
     kind: "tool-call",
     id: "call-1",
@@ -236,20 +236,6 @@ test("tool completion telemetry requires a delivered response", async () => {
     input: {},
     stack: "Error: Tool call stack",
   });
-  const programError = encodeProgramMessage({
-    kind: "program-error",
-    error: {
-      name: "Error",
-      message: "channel failed",
-      stack: null,
-      details: null,
-    },
-  });
-  let markSecondWrite: (() => void) | undefined;
-  const secondWrite = new Promise<void>((resolve) => {
-    markSecondWrite = resolve;
-  });
-  let writes = 0;
   let finishRuntime: ((result: RuntimeFinished) => void) | undefined;
   const finished = new Promise<RuntimeFinished>((resolve) => {
     finishRuntime = resolve;
@@ -260,15 +246,10 @@ test("tool completion telemetry requires a delivered response", async () => {
         channel: {
           incoming: (async function* () {
             yield toolCall;
-            await secondWrite;
-            yield programError;
+            await new Promise<never>(() => {});
           })(),
           outgoing: {
             async write() {
-              writes++;
-              if (writes === 2) {
-                markSecondWrite?.();
-              }
               throw new Error("runtime channel is closed");
             },
             async close() {},
@@ -309,15 +290,65 @@ test("tool completion telemetry requires a delivered response", async () => {
   });
   const toolEvents: string[] = [];
 
-  await client.run("async () => {}", {
-    onTelemetry(event) {
-      if (event.kind.startsWith("tool-call-")) {
-        toolEvents.push(event.kind);
-      }
-    },
-  }).result;
+  await assert.rejects(
+    client.run("async () => {}", {
+      onTelemetry(event) {
+        if (event.kind.startsWith("tool-call-")) {
+          toolEvents.push(event.kind);
+        }
+      },
+    }).result,
+    /runtime channel is closed/,
+  );
 
   assert.deepEqual(toolEvents, ["tool-call-started", "tool-call-failed"]);
+});
+
+test("execution rejects completion while a tool call is pending", async () => {
+  const toolCall = encodeProgramMessage({
+    kind: "tool-call",
+    id: "call-1",
+    name: "missing",
+    input: {},
+    stack: "Error: Tool call stack",
+  });
+  const completed = encodeProgramMessage({ kind: "completed" });
+  let finishRuntime: ((result: RuntimeFinished) => void) | undefined;
+  const finished = new Promise<RuntimeFinished>((resolve) => {
+    finishRuntime = resolve;
+  });
+  const runtime: Runtime = {
+    async start() {
+      return {
+        channel: {
+          incoming: fromChunks([toolCall, completed]),
+          outgoing: {
+            async write() {
+              return await new Promise<never>(() => {});
+            },
+            async close() {},
+          },
+        },
+        finished,
+        async terminate() {
+          finishRuntime?.({ kind: "closed" });
+        },
+      };
+    },
+  };
+  const client = createClient({
+    runtime,
+    toolbox: createToolbox([]),
+    environment: {
+      description: "Pending tool completion test environment.",
+      typeDefinitionFiles: [],
+    },
+  });
+
+  await assert.rejects(
+    client.run("async () => {}").result,
+    /completed while tool calls were still running/,
+  );
 });
 
 function encodeRawBsonFrame(document: Record<string, unknown>): Uint8Array {

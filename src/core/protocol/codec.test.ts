@@ -88,19 +88,32 @@ test("protocol codec preserves BSON binary values", async () => {
 });
 
 test("protocol codec rejects malformed program messages", async () => {
-  const malformed = encodeRawBsonFrame({
-    kind: "tool-call",
-    id: "call-1",
-    input: {},
-    stack: "Error: Tool call stack",
-  });
-
-  await assert.rejects(
-    async () => {
-      await collect(readProgramMessages(fromChunks([malformed])));
+  const malformedMessages = [
+    {
+      kind: "tool-call",
+      id: "call-1",
+      input: {},
+      stack: "Error: Tool call stack",
     },
-    /name/,
-  );
+    {
+      kind: "tool-call",
+      id: "call-1",
+      name: 42,
+      input: {},
+      stack: "Error: Tool call stack",
+    },
+    {
+      kind: "completed",
+      extra: true,
+    },
+  ];
+
+  for (const malformed of malformedMessages) {
+    await assert.rejects(
+      collect(readProgramMessages(fromChunks([encodeRawBsonFrame(malformed)]))),
+      /Invalid code-mode program message/,
+    );
+  }
 });
 
 test("protocol codec rejects invalid frame lengths before reading a payload", async () => {

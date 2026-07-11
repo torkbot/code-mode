@@ -124,6 +124,7 @@ async function runRuntimeInstance(
 ): Promise<ExecuteResult> {
   req.emitTelemetry({ kind: "runtime-started" });
   const pendingToolCalls = new Set<Promise<void>>();
+  const toolCallFailure = Promise.withResolvers<never>();
   let writeQueue: Promise<void> = Promise.resolve();
 
   const writeResponse = async (message: HostMessage): Promise<void> => {
@@ -213,7 +214,17 @@ async function runRuntimeInstance(
     }
   };
 
-  for await (const message of readProgramMessages(instance.channel.incoming)) {
+  const messages = readProgramMessages(instance.channel.incoming)[Symbol.asyncIterator]();
+  for (;;) {
+    const next = await Promise.race([
+      messages.next(),
+      toolCallFailure.promise,
+    ]);
+    if (next.done === true) {
+      break;
+    }
+    const message = next.value;
+
     if (message.kind === "telemetry") {
       req.emitTelemetry(decodeProgramTelemetryEvent(message.event));
       continue;
@@ -222,11 +233,15 @@ async function runRuntimeInstance(
     if (message.kind === "tool-call") {
       const pendingToolCall = handleToolCall(message);
       pendingToolCalls.add(pendingToolCall);
-      void pendingToolCall
-        .finally(() => {
+      void pendingToolCall.then(
+        () => {
           pendingToolCalls.delete(pendingToolCall);
-        })
-        .catch(() => {});
+        },
+        (error: unknown) => {
+          pendingToolCalls.delete(pendingToolCall);
+          toolCallFailure.reject(error);
+        },
+      );
 
       continue;
     }
@@ -255,9 +270,11 @@ async function runRuntimeInstance(
 
     if (message.kind === "completed") {
       if (pendingToolCalls.size > 0) {
-        toolCancellation.abort(
-          new Error("Code-mode program completed while tool calls were still running"),
+        const error = new Error(
+          "Code-mode program completed while tool calls were still running",
         );
+        toolCancellation.abort(error);
+        throw error;
       }
       await instance.terminate("Code-mode program completed");
       try {

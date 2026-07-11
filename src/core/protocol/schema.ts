@@ -136,17 +136,17 @@ function parseProtocolValue<TValue>(
   validator: ProtocolValidator<TValue>,
   value: unknown,
 ): TValue {
-  try {
-    return validator.Parse(value);
-  } catch {
-    const [, errors] = validator.Errors(value);
-    const details = errors.map(formatProtocolValidationError).join("; ");
-    throw new Error(`Invalid code-mode ${direction} message: ${details}`);
+  if (validator.Check(value)) {
+    return value;
   }
+
+  const [, errors] = validator.Errors(value);
+  const details = errors.map(formatProtocolValidationError).join("; ");
+  throw new Error(`Invalid code-mode ${direction} message: ${details}`);
 }
 
 interface ProtocolValidator<TValue> {
-  Parse(value: unknown): TValue;
+  Check(value: unknown): value is TValue;
   Errors(value: unknown): readonly [boolean, readonly ProtocolValidationError[]];
 }
 
