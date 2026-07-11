@@ -10,7 +10,7 @@ const maxReportLength = 8_000;
 export function transpileAgentSource(source: string): TranspileResult {
   try {
     const result = transformSync(
-      `function ${agentProgramFactoryName}(console) {
+      `function ${agentProgramFactoryName}(console, globalThis) {
   const agentProgram = (${source}\n);
   return agentProgram;
 }`,

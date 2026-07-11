@@ -11,6 +11,11 @@ const typeDefinitions = `interface CodeModeConsole {
   warn(...values: unknown[]): void;
 }
 
+type CodeModeGlobalThis = Omit<typeof globalThis, "console" | "globalThis"> & {
+  readonly console: CodeModeConsole;
+  readonly globalThis: CodeModeGlobalThis;
+};
+
 interface Tools {
   getWeather(input: {
     readonly location: string;

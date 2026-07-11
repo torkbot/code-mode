@@ -55,7 +55,7 @@ export type TelemetryEvent =
       readonly error: TelemetryError;
     };
 
-export type TelemetryCallback = (event: TelemetryEvent) => void;
+export type TelemetryCallback = (event: TelemetryEvent) => void | Promise<void>;
 
 export function createTelemetryEmitter(
   callback: TelemetryCallback | undefined,
@@ -66,7 +66,7 @@ export function createTelemetryEmitter(
     }
 
     try {
-      callback(event);
+      void Promise.resolve(callback(event)).catch(() => {});
     } catch {
       // Observability must not alter execution semantics.
     }

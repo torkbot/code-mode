@@ -146,7 +146,16 @@ export async function startProgram(channel) {
   };
 
   try {
-    const run = ${agentProgramFactoryName}(createProgramConsole(emitProgramLog));
+    const programConsole = createProgramConsole(emitProgramLog);
+    let programGlobalThis;
+    programGlobalThis = new Proxy(globalThis, {
+      get(target, property, receiver) {
+        if (property === "console") return programConsole;
+        if (property === "globalThis") return programGlobalThis;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const run = ${agentProgramFactoryName}(programConsole, programGlobalThis);
     const result = await run(scope);
     if (result !== undefined) {
       throw new Error("Code-mode agent program must resolve to undefined");

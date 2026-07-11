@@ -218,10 +218,15 @@ export function generateTypes(req: TypeGenerationRequest): string {
     `  warn(...values: unknown[]): void;`,
     `}`,
     ``,
+    `type CodeModeGlobalThis = Omit<typeof globalThis, "console" | "globalThis"> & {`,
+    `  readonly console: CodeModeConsole;`,
+    `  readonly globalThis: CodeModeGlobalThis;`,
+    `};`,
+    ``,
     `type Exact<Expected, Actual> = Actual extends Expected`,
     `  ? Actual extends readonly unknown[]`,
     `    ? Expected extends ReadonlyArray<infer Item>`,
-    `      ? { readonly [Key in keyof Actual]: Exact<Item, Actual[Key]> }`,
+    `      ? ReadonlyArray<Exact<Item, Actual[number]>>`,
     `      : never`,
     `    : Actual extends object`,
     `      ? { readonly [Key in keyof Actual]: Key extends keyof Expected ? Exact<Expected[Key], Actual[Key]> : never }`,
@@ -419,7 +424,7 @@ function assertObjectSchema(schema: Record<string, unknown>, context: string): v
 function printTool(tool: AgentToolDefinition): string {
   const inputType = printType(tool.inputSchema, "  ");
   const outputType = printType(tool.outputSchema, "  ");
-  const signature = tool.inputSchema.type === "object"
+  const signature = tool.inputSchema.type === "object" || tool.inputSchema.type === "array"
     ? `  ${tool.name}<const Input extends ${inputType}>(input: Exact<${inputType}, Input>): Promise<${outputType}>;`
     : `  ${tool.name}(input: ${inputType}): Promise<${outputType}>;`;
   return [

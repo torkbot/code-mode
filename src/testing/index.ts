@@ -135,6 +135,37 @@ export function testRuntime(options: {
     assert.equal(extraInput.kind, "invalid");
     assert.match(extraInput.report, /extra/);
 
+    const rowsSchema = testSchema({
+      type: "array",
+      items: {
+        type: "object",
+        properties: { id: { type: "string" } },
+        required: ["id"],
+        additionalProperties: false,
+      },
+    } as const);
+    const rowsClient = createClient({
+      runtime,
+      toolbox: createToolbox([
+        defineTool(
+          "saveRows",
+          {
+            description: "Save rows.",
+            inputSchema: rowsSchema,
+            outputSchema: EmptyObject,
+          },
+          async () => ({}),
+        ),
+      ]),
+      environment: testEnvironment,
+    });
+    const extraArrayItem = await rowsClient.validate(`async ({ codemode }) => {
+      const rows = [{ id: "1", extra: true }];
+      await codemode.saveRows(rows);
+    }`, AbortSignal.timeout(5_000));
+    assert.equal(extraArrayItem.kind, "invalid");
+    assert.match(extraArrayItem.report, /extra/);
+
     const manyErrors = await client.validate(`async ({ codemode }) => {
       ${Array.from({ length: 20 }, (_, index) => (
         `await codemode.getWeather({ location: ${index} });`
@@ -303,7 +334,7 @@ export function testRuntime(options: {
     const events: TelemetryEvent[] = [];
     const outcome = await client.run(stringifyTestAgentProgram(labelAgentProgram), {
       signal: AbortSignal.timeout(5_000),
-      onTelemetry(event) {
+      async onTelemetry(event) {
         events.push(event);
         throw new Error("telemetry consumer failed");
       },
@@ -595,7 +626,12 @@ export function testRuntime(options: {
 
     const execution = client.run(stringifyTestAgentProgram(telemetryAgentProgram), {
       signal: AbortSignal.timeout(5_000),
-      onTelemetry: telemetry.onTelemetry,
+      onTelemetry(event) {
+        telemetry.onTelemetry(event);
+        if (event.kind === "tool-call-started") {
+          (event.input as { label: string }).label = "mutated by telemetry";
+        }
+      },
     });
     let resultSettled = false;
     const result = execution.finally(() => {
@@ -616,11 +652,12 @@ export function testRuntime(options: {
     assert.equal(programLog.values[3], 1n);
     assert.ok(programLog.values[4] instanceof Error);
     assert.equal(programLog.values[4].message, "logged failure");
+    assert.deepEqual(programLog.values[5], { $type: "bigint", value: "abc" });
     assert.equal(resultSettled, false);
 
     const toolStarted = await telemetry.next("tool-call-started");
     assert.equal(toolStarted.toolName, "waitForRelease");
-    assert.deepEqual(toolStarted.input, { label: "gate" });
+    assert.deepEqual(toolStarted.input, { label: "mutated by telemetry" });
     assert.equal(resultSettled, false);
 
     telemetryToolbox.release();
@@ -1153,7 +1190,14 @@ const telemetryAgentProgram: AgentProgram<TelemetryApi> = async ({
     enumerable: true,
     value: payload,
   });
-  console.log("about to wait", payload, undefined, 1n, new Error("logged failure"));
+  console.log(
+    "about to wait",
+    payload,
+    undefined,
+    1n,
+    new Error("logged failure"),
+    { $type: "bigint", value: "abc" },
+  );
   await codemode.waitForRelease({ label: "gate" });
 };
 

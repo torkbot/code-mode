@@ -130,7 +130,7 @@ async function runRuntimeInstance(
       kind: "tool-call-started",
       toolCallId: message.id,
       toolName: message.name,
-      input: message.input,
+      input: structuredClone(message.input),
     });
 
     const tool = req.tools[message.name];
@@ -447,7 +447,11 @@ function reviveConsoleValue(value: unknown, seen = new WeakSet<object>()): unkno
       return undefined;
     }
     if (value.$type === "bigint" && "value" in value && typeof value.value === "string") {
-      return BigInt(value.value);
+      try {
+        return BigInt(value.value);
+      } catch {
+        return value;
+      }
     }
     if (
       value.$type === "error"

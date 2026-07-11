@@ -42,7 +42,7 @@ test("host-node runtime type definitions validate Node globals and node: imports
   assert.deepEqual(validation, { kind: "valid" });
 
   const unsupportedConsole = await client.validate(
-    "async () => { console.table([]); }",
+    "async () => { globalThis.console.table([]); }",
     AbortSignal.timeout(5_000),
   );
   assert.equal(unsupportedConsole.kind, "invalid");
