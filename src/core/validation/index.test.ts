@@ -13,6 +13,7 @@ const typeDefinitions = `interface CodeModeConsole {
 
 type CodeModeGlobalThis = Omit<typeof globalThis, "console" | "globalThis"> & {
   readonly console: CodeModeConsole;
+  readonly global: CodeModeGlobalThis;
   readonly globalThis: CodeModeGlobalThis;
 };
 

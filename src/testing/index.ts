@@ -445,6 +445,16 @@ export function testRuntime(options: {
 
     assert.equal(derivedPromise.kind, "program-failed");
     assert.equal(derivedPromise.error.message, "unobserved tool failure");
+
+    const twoHandlerDerivedPromise = await client.run(`async ({ codemode }) => {
+      void codemode.fail({}).then(() => {}, () => { throw new Error("handler failed"); });
+      await codemode.waitForFailure({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    assert.equal(twoHandlerDerivedPromise.kind, "program-failed");
+    assert.equal(twoHandlerDerivedPromise.error.message, "handler failed");
   });
 
   test(`${options.name}: client runs an agent program against toolbox tools`, async () => {

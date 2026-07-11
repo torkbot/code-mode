@@ -47,6 +47,13 @@ test("host-node runtime type definitions validate Node globals and node: imports
   );
   assert.equal(unsupportedConsole.kind, "invalid");
   assert.match(unsupportedConsole.report, /Property 'table' does not exist/);
+
+  const unsupportedGlobalConsole = await client.validate(
+    "async () => { global.console.table([]); }",
+    AbortSignal.timeout(5_000),
+  );
+  assert.equal(unsupportedGlobalConsole.kind, "invalid");
+  assert.match(unsupportedGlobalConsole.report, /Property 'table' does not exist/);
 });
 
 test("host-node resolves package imports from the runtime working directory", async () => {

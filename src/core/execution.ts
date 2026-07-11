@@ -431,7 +431,7 @@ function decodeProgramTelemetryEvent(
 
 function decodeConsoleValue(value: SerializedConsoleValue): unknown {
   const envelope = parseFlatted(value.value) as {
-    readonly marker: string;
+    readonly marker: object;
     readonly value: unknown;
   };
   return reviveConsoleValue(envelope.value, envelope.marker);
@@ -439,7 +439,7 @@ function decodeConsoleValue(value: SerializedConsoleValue): unknown {
 
 function reviveConsoleValue(
   value: unknown,
-  marker: string,
+  marker: object,
   seen = new WeakSet<object>(),
 ): unknown {
   if (typeof value !== "object" || value === null) {

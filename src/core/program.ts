@@ -139,7 +139,7 @@ export async function startProgram(channel) {
 
             return response;
           })();
-          return trackToolCall(id, call);
+          return trackToolCall(call, true);
         };
       },
     }),
@@ -151,11 +151,17 @@ export async function startProgram(channel) {
     programGlobalThis = new Proxy(globalThis, {
       get(target, property, receiver) {
         if (property === "console") return programConsole;
-        if (property === "globalThis") return programGlobalThis;
+        if (property === "globalThis" || property === "global") {
+          return programGlobalThis;
+        }
         return Reflect.get(target, property, receiver);
       },
     });
-    const run = ${agentProgramFactoryName}(programConsole, programGlobalThis);
+    const run = ${agentProgramFactoryName}(
+      programConsole,
+      programGlobalThis,
+      programGlobalThis,
+    );
     const result = await run(scope);
     if (result !== undefined) {
       throw new Error("Code-mode agent program must resolve to undefined");
@@ -200,25 +206,27 @@ export async function startProgram(channel) {
     return response;
   }
 
-  function trackToolCall(id, call) {
+  function trackToolCall(call, requireObservation) {
+    const key = {};
     let observed = false;
-    unobservedToolCalls.set(id, undefined);
-    void call.catch((error) => {
-      if (!observed) {
-        unobservedToolCalls.set(id, error);
-      }
-    });
+    unobservedToolCalls.set(key, undefined);
+    void call.then(
+      () => {
+        if (!requireObservation) unobservedToolCalls.delete(key);
+      },
+      (error) => {
+        if (!observed) unobservedToolCalls.set(key, error);
+      },
+    );
 
     return new Proxy(call, {
       get(target, property) {
         if (property === "then" || property === "catch" || property === "finally") {
           return (...args) => {
             observed = true;
-            unobservedToolCalls.delete(id);
+            unobservedToolCalls.delete(key);
             const derived = target[property](...args);
-            return property === "then" && typeof args[1] === "function"
-              ? derived
-              : trackToolCall(id, derived);
+            return trackToolCall(derived, false);
           };
         }
 
@@ -330,7 +338,7 @@ export async function startProgram(channel) {
   }
 
   function serializeConsoleValue(value) {
-    const marker = crypto.randomUUID();
+    const marker = {};
     const encodeValue = (_key, nested) => encodeConsoleValue(marker, nested);
     try {
       return {
