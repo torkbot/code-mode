@@ -13,6 +13,7 @@ import {
 } from "../node-runtime/bootstrap.ts";
 
 const maximumStderrLength = 64 * 1024;
+const terminationGracePeriodMilliseconds = 1_000;
 
 export interface SandboxNodeRuntimeOptions {
   readonly sandbox: SandboxNodeHost;
@@ -41,7 +42,7 @@ export interface SandboxNodeProcess {
   readonly pipes: ReadonlyMap<number, SandboxNodeProcessPipe>;
   readonly ready: Promise<void>;
   readonly exit: Promise<SandboxNodeProcessExit>;
-  kill(signal: "SIGTERM"): void;
+  kill(signal: "SIGTERM" | "SIGKILL"): void;
 }
 
 export interface SandboxNodeProcessPipe {
@@ -82,10 +83,15 @@ export class SandboxNodeRuntime implements Runtime {
     }
 
     let terminationRequested = false;
-    const abort = (): void => {
+    let forceTerminationTimeout: ReturnType<typeof setTimeout> | undefined;
+    const requestTermination = (): void => {
       terminationRequested = true;
       process.kill("SIGTERM");
+      forceTerminationTimeout ??= setTimeout(() => {
+        process.kill("SIGKILL");
+      }, terminationGracePeriodMilliseconds);
     };
+    const abort = (): void => requestTermination();
     if (req.signal.aborted) {
       abort();
     } else {
@@ -102,8 +108,11 @@ export class SandboxNodeRuntime implements Runtime {
       );
     } catch (error) {
       req.signal.removeEventListener("abort", abort);
-      process.kill("SIGTERM");
+      requestTermination();
       await Promise.allSettled([process.exit, stdout, stderr]);
+      if (forceTerminationTimeout !== undefined) {
+        clearTimeout(forceTerminationTimeout);
+      }
       throw error;
     }
 
@@ -144,6 +153,9 @@ export class SandboxNodeRuntime implements Runtime {
         };
       } finally {
         req.signal.removeEventListener("abort", abort);
+        if (forceTerminationTimeout !== undefined) {
+          clearTimeout(forceTerminationTimeout);
+        }
       }
     })();
 
@@ -151,8 +163,7 @@ export class SandboxNodeRuntime implements Runtime {
       channel,
       finished,
       async terminate(_reason: string): Promise<void> {
-        terminationRequested = true;
-        process.kill("SIGTERM");
+        requestTermination();
         await finished;
       },
     };

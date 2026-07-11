@@ -285,17 +285,20 @@ function assertToolSchema(value: unknown, context: string): asserts value is Too
   const standard = value["~standard"];
   assertRecord(standard, `${context}.~standard`);
 
-  if (standard.version !== 1) {
+  if (standard["version"] !== 1) {
     throw new Error(`Code-mode schema ${context}.~standard.version must be 1`);
   }
-  assertNonEmptyString(standard.vendor, `${context}.~standard.vendor`);
-  if (typeof standard.validate !== "function") {
+  assertNonEmptyString(standard["vendor"], `${context}.~standard.vendor`);
+  if (typeof standard["validate"] !== "function") {
     throw new Error(`Code-mode schema ${context}.~standard.validate must be a function`);
   }
 
-  const jsonSchema = standard.jsonSchema;
+  const jsonSchema = standard["jsonSchema"];
   assertRecord(jsonSchema, `${context}.~standard.jsonSchema`);
-  if (typeof jsonSchema.input !== "function" || typeof jsonSchema.output !== "function") {
+  if (
+    typeof jsonSchema["input"] !== "function"
+    || typeof jsonSchema["output"] !== "function"
+  ) {
     throw new Error(
       `Code-mode schema ${context}.~standard.jsonSchema must provide input() and output()`,
     );
@@ -305,12 +308,13 @@ function assertToolSchema(value: unknown, context: string): asserts value is Too
 function assertSupportedSchema(schema: unknown, context: string): SupportedJsonSchema {
   assertRecord(schema, context);
 
-  if (typeof schema.type !== "string") {
+  const type = schema["type"];
+  if (typeof type !== "string") {
     throw new Error(`Code-mode schema ${context} type must be a string`);
   }
-  optionalNonEmptyString(schema.description, `${context}.description`);
+  optionalNonEmptyString(schema["description"], `${context}.description`);
 
-  switch (schema.type) {
+  switch (type) {
     case "object":
       assertSchemaKeywords(schema, context, [
         "type",
@@ -323,11 +327,14 @@ function assertSupportedSchema(schema: unknown, context: string): SupportedJsonS
       return schema as unknown as ObjectJsonSchema;
     case "array":
       assertSchemaKeywords(schema, context, ["type", "description", "items"]);
-      assertSupportedSchema(schema.items, `${context}.items`);
+      assertSupportedSchema(schema["items"], `${context}.items`);
       return schema as unknown as ArrayJsonSchema;
     case "string":
       assertSchemaKeywords(schema, context, ["type", "description", "format"]);
-      if (schema.format !== undefined && typeof schema.format !== "string") {
+      if (
+        schema["format"] !== undefined
+        && typeof schema["format"] !== "string"
+      ) {
         throw new Error(`Code-mode schema ${context}.format must be a string`);
       }
       return schema as unknown as StringJsonSchema;
@@ -344,7 +351,7 @@ function assertSupportedSchema(schema: unknown, context: string): SupportedJsonS
       assertSchemaKeywords(schema, context, ["type", "description"]);
       return schema as unknown as NullJsonSchema;
     default:
-      throw new Error(`Code-mode schema ${context} uses unsupported type: ${schema.type}`);
+      throw new Error(`Code-mode schema ${context} uses unsupported type: ${type}`);
   }
 }
 
@@ -364,34 +371,36 @@ function assertSchemaKeywords(
 }
 
 function assertObjectSchema(schema: Record<string, unknown>, context: string): void {
-  if (!isRecord(schema.properties)) {
+  const properties = schema["properties"];
+  const required = schema["required"];
+  if (!isRecord(properties)) {
     throw new Error(`Code-mode schema ${context}.properties must be an object`);
   }
-  if (schema.required !== undefined && !Array.isArray(schema.required)) {
+  if (required !== undefined && !Array.isArray(required)) {
     throw new Error(`Code-mode schema ${context}.required must be an array`);
   }
-  if (schema.additionalProperties !== false) {
+  if (schema["additionalProperties"] !== false) {
     throw new Error(
       `Code-mode schema ${context}.additionalProperties must be false`,
     );
   }
 
-  const propertyNames = new Set(Object.keys(schema.properties));
+  const propertyNames = new Set(Object.keys(properties));
   const requiredNames = new Set<string>();
-  for (const required of schema.required ?? []) {
-    if (typeof required !== "string") {
+  for (const requiredName of required ?? []) {
+    if (typeof requiredName !== "string") {
       throw new Error(`Code-mode schema ${context}.required entries must be strings`);
     }
-    if (requiredNames.has(required)) {
-      throw new Error(`Code-mode schema ${context}.required includes a duplicate property: ${required}`);
+    if (requiredNames.has(requiredName)) {
+      throw new Error(`Code-mode schema ${context}.required includes a duplicate property: ${requiredName}`);
     }
-    if (!propertyNames.has(required)) {
-      throw new Error(`Code-mode schema ${context}.required property is not declared: ${required}`);
+    if (!propertyNames.has(requiredName)) {
+      throw new Error(`Code-mode schema ${context}.required property is not declared: ${requiredName}`);
     }
-    requiredNames.add(required);
+    requiredNames.add(requiredName);
   }
 
-  for (const [propertyName, propertySchema] of Object.entries(schema.properties)) {
+  for (const [propertyName, propertySchema] of Object.entries(properties)) {
     assertSupportedSchema(propertySchema, `${context}.properties.${propertyName}`);
   }
 }

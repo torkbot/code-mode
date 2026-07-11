@@ -173,9 +173,10 @@ A runtime evaluates the module, invokes startProgram(channel), and reports
 lifecycle completion. It does not decode messages or inject globals.
 
 For Node.js, built-in adapters evaluate a bootstrap as an ES module. The
-bootstrap imports the generated module from an in-memory URL, adapts one
-full-duplex descriptor to ByteChannel, and invokes startProgram(). Sandbox
-adapters may stream the bootstrap through stdin. No generated file is required.
+bootstrap loads the generated source in memory against a virtual file URL rooted
+at the child working directory, adapts one full-duplex descriptor to ByteChannel,
+and invokes startProgram(). Bare dynamic imports therefore use normal Node.js
+package resolution without requiring a generated file.
 
 ## Agent Contract
 

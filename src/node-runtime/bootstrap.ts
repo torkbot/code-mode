@@ -12,10 +12,12 @@ export function createNodeBootstrapSource(program: Program): string {
 }
 
 function createJavaScriptModuleBootstrap(source: string): string {
-  const programUrl = `data:text/javascript;base64,${Buffer.from(source, "utf8").toString("base64")}`;
   return `
 import { once } from "node:events";
 import { createReadStream, createWriteStream } from "node:fs";
+import { registerHooks } from "node:module";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 
 const channelFd = Number(process.env[${JSON.stringify(nodeChannelFdEnvironmentVariable)}]);
 
@@ -32,7 +34,36 @@ const output = createWriteStream(null, {
   autoClose: false,
 });
 
-const program = await import(${JSON.stringify(programUrl)});
+const programUrl = pathToFileURL(
+  resolve(process.cwd(), ".code-mode-runtime-program.mjs"),
+).href;
+const hooks = registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === programUrl) {
+      return {
+        shortCircuit: true,
+        url: programUrl,
+      };
+    }
+    return nextResolve(specifier, context);
+  },
+  load(url, context, nextLoad) {
+    if (url === programUrl) {
+      return {
+        format: "module",
+        shortCircuit: true,
+        source: ${JSON.stringify(source)},
+      };
+    }
+    return nextLoad(url, context);
+  },
+});
+let program;
+try {
+  program = await import(programUrl);
+} finally {
+  hooks.deregister();
+}
 const start = program[${JSON.stringify(programEntrypointName)}];
 
 if (typeof start !== "function") {

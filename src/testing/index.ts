@@ -207,6 +207,13 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.equal(nonVoid.kind, "program-failed");
     assert.match(nonVoid.error.message, /must resolve to undefined/);
 
+    const factoryFailure = await emptyClient.run(
+      `(() => { throw new Error("factory failure"); })()`,
+      { signal: AbortSignal.timeout(5_000) },
+    ).result;
+    assert.equal(factoryFailure.kind, "program-failed");
+    assert.equal(factoryFailure.error.message, "factory failure");
+
     const unknown = await emptyClient.run(
       "async ({ codemode }) => { await codemode.notRegistered({}); }",
       { signal: AbortSignal.timeout(5_000) },

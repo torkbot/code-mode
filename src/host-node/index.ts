@@ -18,6 +18,7 @@ import {
 export { readNode24TypeDefinitions } from "./node24.ts";
 
 const maximumStderrLength = 64 * 1024;
+const terminationGracePeriodMilliseconds = 1_000;
 
 export class HostNodeRuntime implements Runtime {
   readonly #nodePath: string;
@@ -57,11 +58,17 @@ export class HostNodeRuntime implements Runtime {
     });
 
     let terminationRequested = false;
+    let forceTerminationTimeout: ReturnType<typeof setTimeout> | undefined;
 
-    const abort = (): void => {
+    const requestTermination = (): void => {
       terminationRequested = true;
       child.kill("SIGTERM");
+      forceTerminationTimeout ??= setTimeout(() => {
+        child.kill("SIGKILL");
+      }, terminationGracePeriodMilliseconds);
+      forceTerminationTimeout.unref();
     };
+    const abort = (): void => requestTermination();
 
     if (req.signal.aborted) {
       abort();
@@ -79,6 +86,9 @@ export class HostNodeRuntime implements Runtime {
 
         settled = true;
         req.signal.removeEventListener("abort", abort);
+        if (forceTerminationTimeout !== undefined) {
+          clearTimeout(forceTerminationTimeout);
+        }
         resolve(result);
       };
 
@@ -114,8 +124,7 @@ export class HostNodeRuntime implements Runtime {
       );
       await bootstrapWriter.close();
     } catch (error) {
-      terminationRequested = true;
-      child.kill("SIGTERM");
+      requestTermination();
       await finished;
       throw error;
     }
@@ -125,8 +134,7 @@ export class HostNodeRuntime implements Runtime {
       finished,
       async terminate(reason: string): Promise<void> {
         void reason;
-        terminationRequested = true;
-        child.kill("SIGTERM");
+        requestTermination();
         await finished;
       },
     };

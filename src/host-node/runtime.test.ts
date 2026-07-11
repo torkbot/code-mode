@@ -44,6 +44,44 @@ test("host-node runtime type definitions validate Node globals and node: imports
   assert.deepEqual(validation, { kind: "valid" });
 });
 
+test("host-node resolves package imports from the runtime working directory", async () => {
+  const client = createClient({
+    runtime: await createHostNodeRuntime(),
+    toolbox: createToolbox([]),
+    environment: {
+      description: `Node.js ${process.version}`,
+      typeDefinitionFiles: [],
+    },
+  });
+
+  assert.deepEqual(
+    await client.run(`async () => {
+      const bson = await import("bson");
+      if (typeof bson.BSON.serialize !== "function") throw new Error("missing bson");
+    }`, { signal: AbortSignal.timeout(5_000) }).result,
+    { kind: "success" },
+  );
+});
+
+test("host-node escalates termination when a program ignores SIGTERM", async () => {
+  const client = createClient({
+    runtime: await createHostNodeRuntime(),
+    toolbox: createToolbox([]),
+    environment: {
+      description: `Node.js ${process.version}`,
+      typeDefinitionFiles: [],
+    },
+  });
+
+  assert.deepEqual(
+    await client.run(`async () => {
+      process.on("SIGTERM", () => {});
+      setInterval(() => {}, 1_000);
+    }`, { signal: AbortSignal.timeout(5_000) }).result,
+    { kind: "success" },
+  );
+});
+
 test("host-node streams programs larger than process argument limits", async () => {
   const runtime = await createHostNodeRuntime();
   const instance = await runtime.start({

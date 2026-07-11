@@ -2,7 +2,7 @@ import type { Program, Runtime, RuntimeInstance } from "./runtime.ts";
 import { programEntrypointName } from "./runtime.ts";
 import { bsonRuntimeSource } from "../runtime-code/bson.ts";
 import {
-  agentProgramVariableName,
+  agentProgramFactoryName,
   transpileAgentSource,
 } from "./transpile.ts";
 import {
@@ -79,10 +79,7 @@ const maximumTelemetryErrorMessageLength = ${maximumTelemetryErrorMessageLength}
 const maximumTelemetryErrorStackLength = ${maximumTelemetryErrorStackLength};
 const maximumTelemetryErrorReportLength = ${maximumTelemetryErrorReportLength};
 
-const createAgentProgram = (console) => {
 ${agentProgramJavaScript}
-  return ${agentProgramVariableName};
-};
 const flattedStringify = createFlattedStringify();
 
 // Bundled from flatted, ISC License, Copyright (c) Andrea Giammarchi, @WebReflection.
@@ -146,7 +143,6 @@ export async function ${programEntrypointName}(channel) {
   const unobservedToolCalls = new Map();
   let responsePump;
   let writeQueue = Promise.resolve();
-  const run = createAgentProgram(createProgramConsole(emitProgramLog));
   const scope = {
     codemode: new Proxy({}, {
       get(_target, property) {
@@ -188,6 +184,7 @@ export async function ${programEntrypointName}(channel) {
       kind: "program-started",
     });
 
+    const run = ${agentProgramFactoryName}(createProgramConsole(emitProgramLog));
     const result = await run(scope);
     if (result !== undefined) {
       throw new Error("Code-mode agent program must resolve to undefined");

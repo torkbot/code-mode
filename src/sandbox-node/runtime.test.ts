@@ -6,6 +6,7 @@ import type { Duplex } from "node:stream";
 import test from "node:test";
 
 import { testRuntime } from "../testing/index.ts";
+import { createClient, createToolbox } from "../index.ts";
 import {
   SandboxNodeRuntime,
   type SandboxNodeHost,
@@ -16,11 +17,7 @@ import {
 testRuntime({
   name: "sandbox-node runtime",
   async createRuntime() {
-    return new SandboxNodeRuntime({
-      sandbox: new HostBackedSandbox(),
-      nodePath: process.execPath,
-      cwd: process.cwd(),
-    });
+    return createSandboxNodeRuntime();
   },
 });
 
@@ -97,6 +94,52 @@ test("sandbox-node bounds stderr retained for process failures", async () => {
   assert.match(finished.error.message, /stderr sentinel/);
   assert.ok(finished.error.message.length < 66_000);
 });
+
+test("sandbox-node resolves package imports from the runtime working directory", async () => {
+  const client = createClient({
+    runtime: createSandboxNodeRuntime(),
+    toolbox: createToolbox([]),
+    environment: {
+      description: `Node.js ${process.version}`,
+      typeDefinitionFiles: [],
+    },
+  });
+
+  assert.deepEqual(
+    await client.run(`async () => {
+      const bson = await import("bson");
+      if (typeof bson.BSON.serialize !== "function") throw new Error("missing bson");
+    }`, { signal: AbortSignal.timeout(5_000) }).result,
+    { kind: "success" },
+  );
+});
+
+test("sandbox-node escalates termination when a program ignores SIGTERM", async () => {
+  const client = createClient({
+    runtime: createSandboxNodeRuntime(),
+    toolbox: createToolbox([]),
+    environment: {
+      description: `Node.js ${process.version}`,
+      typeDefinitionFiles: [],
+    },
+  });
+
+  assert.deepEqual(
+    await client.run(`async () => {
+      process.on("SIGTERM", () => {});
+      setInterval(() => {}, 1_000);
+    }`, { signal: AbortSignal.timeout(5_000) }).result,
+    { kind: "success" },
+  );
+});
+
+function createSandboxNodeRuntime(): SandboxNodeRuntime {
+  return new SandboxNodeRuntime({
+    sandbox: new HostBackedSandbox(),
+    nodePath: process.execPath,
+    cwd: process.cwd(),
+  });
+}
 
 class HostBackedSandbox implements SandboxNodeHost {
   spawn(

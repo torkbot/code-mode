@@ -413,12 +413,14 @@ function parseStackFrame(line: string): StackFrame | undefined {
 
   const frame = line.slice(3);
   const named = /^(?<name>.*?) \((?<location>.*)\)$/.exec(frame);
+  const namedGroups = named?.groups;
+  const namedLocation = namedGroups?.["location"];
 
-  if (named?.groups?.location !== undefined) {
-    return {
-      name: named.groups.name,
-      location: named.groups.location,
-    };
+  if (namedLocation !== undefined) {
+    const name = namedGroups?.["name"];
+    return name === undefined
+      ? { location: namedLocation }
+      : { name, location: namedLocation };
   }
 
   if (frame.length > 0) {
@@ -445,21 +447,31 @@ function formatStackLocation(location: string): string {
 
 function parseStackLocation(location: string): StackLocation | undefined {
   const match = /^(?<source>.*?)(?::(?<line>\d+))?(?::(?<column>\d+))?$/.exec(location);
+  const groups = match?.groups;
+  const source = groups?.["source"];
 
-  if (match?.groups?.source === undefined) {
+  if (source === undefined) {
     return undefined;
   }
 
+  const line = groups?.["line"];
+  const column = groups?.["column"];
   return {
-    source: match.groups.source,
-    line: match.groups.line,
-    column: match.groups.column,
+    source,
+    ...(line === undefined ? {} : { line }),
+    ...(column === undefined ? {} : { column }),
   };
 }
 
 function formatStackSource(source: string): string {
   if (source.length === 0) {
     return "<unknown>";
+  }
+  if (
+    source === ".code-mode-runtime-program.mjs"
+    || source.endsWith("/.code-mode-runtime-program.mjs")
+  ) {
+    return "<generated-runtime-program>";
   }
 
   try {

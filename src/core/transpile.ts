@@ -4,13 +4,16 @@ export type TranspileResult =
   | { readonly kind: "javascript"; readonly source: string }
   | { readonly kind: "invalid"; readonly report: string };
 
-export const agentProgramVariableName = "__codeModeAgentProgram";
+export const agentProgramFactoryName = "__createCodeModeAgentProgram";
 const maxReportLength = 8_000;
 
 export function transpileAgentSource(source: string): TranspileResult {
   try {
     const result = transformSync(
-      `const ${agentProgramVariableName} = (${source}\n);`,
+      `function ${agentProgramFactoryName}(console) {
+  const agentProgram = (${source}\n);
+  return agentProgram;
+}`,
       {
         filename: "agent.ts",
         mode: "strip-only",

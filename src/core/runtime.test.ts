@@ -2,7 +2,11 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import { createProgram, startProgram } from "./program.ts";
+import {
+  AgentSourceSyntaxError,
+  createProgram,
+  startProgram,
+} from "./program.ts";
 import { maximumBsonFrameLength, readProgramMessages } from "./protocol/codec.ts";
 import type {
   ByteChannel,
@@ -70,7 +74,10 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
   assert.doesNotMatch(observedProgram?.source ?? "", /const run = \(\(/);
   assert.match(observedProgram?.source ?? "", /Bundled from flatted/);
   assert.match(observedProgram?.source ?? "", /flattedStringify/);
-  assert.match(observedProgram?.source ?? "", /const createAgentProgram = \(console\) =>/);
+  assert.match(
+    observedProgram?.source ?? "",
+    /function __createCodeModeAgentProgram\(console\)/,
+  );
   assert.match(observedProgram?.source ?? "", /readBsonFrames\(channel\.incoming\)/);
   assert.match(observedProgram?.source ?? "", /channel\.outgoing\.write/);
   assert.match(observedProgram?.source ?? "", /kind: "program-log"/);
@@ -108,13 +115,20 @@ test("createProgram returns a discriminated self-contained module", () => {
   assert.doesNotMatch(program.source, /const run = \(\(/);
   assert.match(program.source, /Bundled from flatted/);
   assert.match(program.source, /flattedStringify/);
-  assert.match(program.source, /const createAgentProgram = \(console\) =>/);
+  assert.match(program.source, /function __createCodeModeAgentProgram\(console\)/);
   assert.match(program.source, /readBsonFrames\(channel\.incoming\)/);
   assert.match(program.source, /channel\.outgoing\.write/);
   assert.match(program.source, /kind: "program-log"/);
   assert.match(program.source, /codemode: new Proxy/);
   assert.match(program.source, /async \(\) => \(\{ message: 'hello from code-mode' \}\)/);
   assert.match(program.source, /await run\(scope\)/);
+});
+
+test("createProgram checks syntax in the generated factory context", () => {
+  assert.throws(
+    () => createProgram({ agentSource: 'await import("node:fs")' }),
+    AgentSourceSyntaxError,
+  );
 });
 
 test("generated programs reject oversized host frames before reading a payload", async () => {

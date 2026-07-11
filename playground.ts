@@ -46,7 +46,7 @@ async function main() {
         additionalProperties: false,
       } as const),
     },
-    async (ctx, query) => {
+    async (_ctx, query) => {
       console.log(query);
       return {
         flights: [],

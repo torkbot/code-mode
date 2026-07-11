@@ -44,15 +44,15 @@ test("public root and host-node sub-path exports are declared", async () => {
     "rm -rf dist && tsc --project tsconfig.build.json --pretty --emitDeclarationOnly",
   );
   assert.equal(packageJson.dependencies["@typescript/native-preview"], undefined);
-  assert.equal(typeof packageJson.dependencies.typescript, "string");
-  assert.equal(typeof packageJson.dependencies.amaro, "string");
+  assert.equal(typeof packageJson.dependencies["typescript"], "string");
+  assert.equal(typeof packageJson.dependencies["amaro"], "string");
   assert.equal(typeof packageJson.dependencies["@standard-schema/spec"], "string");
   assert.equal(typeof packageJson.dependencies["@types/node"], "string");
-  assert.equal(typeof packageJson.dependencies.bson, "string");
-  assert.equal(typeof packageJson.dependencies.typebox, "string");
-  assert.equal(packageJson.devDependencies?.typescript, undefined);
+  assert.equal(typeof packageJson.dependencies["bson"], "string");
+  assert.equal(typeof packageJson.dependencies["typebox"], "string");
+  assert.equal(packageJson.devDependencies?.["typescript"], undefined);
   assert.equal(packageJson.devDependencies?.["@types/node"], undefined);
-  assert.equal(packageJson.devDependencies?.typebox, undefined);
+  assert.equal(packageJson.devDependencies?.["typebox"], undefined);
 });
 
 test("public root export is focused on toolbox and client APIs", async () => {
@@ -155,7 +155,8 @@ test("runtime build and validation components do not write generated artifacts t
 
   assert.doesNotMatch(hostNodeRuntime, /--eval/);
   assert.match(hostNodeRuntime, /bootstrapWriter/);
-  assert.match(nodeBootstrap, /data:text\/javascript;base64/);
+  assert.match(nodeBootstrap, /registerHooks/);
+  assert.match(nodeBootstrap, /\.code-mode-runtime-program\.mjs/);
   assert.match(sandboxNodeRuntime, /writeAndClose/);
   assert.match(validation, /new API/);
   assert.match(validation, /createValidationFileSystem/);

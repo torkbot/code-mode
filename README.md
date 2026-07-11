@@ -255,7 +255,9 @@ const runtime = new HostNodeRuntime({ nodePath: process.execPath });
 ```
 
 The required path is used to spawn a child Node.js process. The generated module
-is evaluated from an in-memory URL and the byte channel uses fd 3.
+is loaded in memory against a virtual file URL rooted at the child working
+directory, so bare dynamic imports use normal Node.js package resolution. The
+byte channel uses fd 3.
 
 ### Sandbox Node.js
 
@@ -271,8 +273,8 @@ const runtime = new SandboxNodeRuntime({
 
 The sandbox host must support streaming spawn with caller-selected full-duplex
 descriptors. The adapter requests fd 3, streams a self-contained bootstrap over
-stdin, and uses fd 3 exclusively for code-mode traffic. No generated runtime
-file is required in the guest.
+stdin, and uses fd 3 exclusively for code-mode traffic. The generated module is
+anchored at `cwd` for package resolution without writing a runtime file.
 
 ## Runtime Conformance
 
