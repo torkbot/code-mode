@@ -2,22 +2,20 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import type {
-  AgentProgram,
   TelemetryEvent,
   Runtime,
 } from "../index.ts";
 import { createClient, createToolbox, defineTool } from "../index.ts";
 import { testSchema, testTransformSchema } from "./schema.ts";
 
-export type RuntimeFactory =
-  () => Promise<Runtime>;
+type AgentProgram<TApi = unknown> = (
+  scope: { readonly codemode: TApi },
+) => Promise<void>;
 
-export interface RuntimeTestOptions {
+export function testRuntime(options: {
   readonly name: string;
-  readonly createRuntime: RuntimeFactory;
-}
-
-export function testRuntime(options: RuntimeTestOptions): void {
+  createRuntime(): Promise<Runtime>;
+}): void {
   test(`${options.name}: agent journey reads declarations, checks, and runs without checking side effects`, async () => {
     const runtime = await options.createRuntime();
     let executions = 0;
@@ -45,7 +43,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
 
     const invalid = await client.validate(
       "async ({ codemode }) => { await codemode.label({ value: 42 }); }",
-      { signal: AbortSignal.timeout(5_000) },
+      AbortSignal.timeout(5_000),
     );
     assert.equal(invalid.kind, "invalid");
     assert.equal(executions, 0);
@@ -55,12 +53,12 @@ export function testRuntime(options: RuntimeTestOptions): void {
       if (result.source !== "journey") throw new Error("unexpected label");
     }`;
     assert.deepEqual(
-      await client.validate(source, { signal: AbortSignal.timeout(5_000) }),
+      await client.validate(source, AbortSignal.timeout(5_000)),
       { kind: "valid" },
     );
     assert.equal(executions, 0);
     assert.deepEqual(
-      await client.run(source, { signal: AbortSignal.timeout(5_000) }).result,
+      await client.run(source, { signal: AbortSignal.timeout(5_000) }),
       { kind: "success" },
     );
     assert.equal(executions, 1);
@@ -86,7 +84,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
 
     const invalid = await client.validate(
       "async ({ codemode }) => { await codemode.ping(42); }",
-      { signal: AbortSignal.timeout(5_000) },
+      AbortSignal.timeout(5_000),
     );
     assert.equal(invalid.kind, "invalid");
 
@@ -95,18 +93,18 @@ export function testRuntime(options: RuntimeTestOptions): void {
       await codemode.ping({});
     } // trailing comment`;
     assert.deepEqual(
-      await client.validate(source, { signal: AbortSignal.timeout(5_000) }),
+      await client.validate(source, AbortSignal.timeout(5_000)),
       { kind: "valid" },
     );
     assert.deepEqual(
-      await client.run(source, { signal: AbortSignal.timeout(5_000) }).result,
+      await client.run(source, { signal: AbortSignal.timeout(5_000) }),
       { kind: "success" },
     );
 
     assert.deepEqual(
       await client.run("async ({ codemode }) => { await codemode; }", {
         signal: AbortSignal.timeout(5_000),
-      }).result,
+      }),
       { kind: "success" },
     );
   });
@@ -119,15 +117,13 @@ export function testRuntime(options: RuntimeTestOptions): void {
       environment: testEnvironment,
     });
 
-    const syntax = await client.validate("async ({", {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const syntax = await client.validate("async ({", AbortSignal.timeout(5_000));
     assert.equal(syntax.kind, "invalid");
     assert.match(syntax.report, /TS\d+/);
 
     const unknown = await client.validate(
       "async ({ codemode }) => { await codemode.notRegistered({}); }",
-      { signal: AbortSignal.timeout(5_000) },
+      AbortSignal.timeout(5_000),
     );
     assert.equal(unknown.kind, "invalid");
     assert.match(unknown.report, /notRegistered/);
@@ -136,7 +132,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
       ${Array.from({ length: 20 }, (_, index) => (
         `await codemode.getWeather({ location: ${index} });`
       )).join("\n")}
-    }`, { signal: AbortSignal.timeout(5_000) });
+    }`, AbortSignal.timeout(5_000));
     assert.equal(manyErrors.kind, "invalid");
     assert.ok(manyErrors.diagnostics.length <= 8);
     assert.ok(manyErrors.report.length <= 8_000);
@@ -145,7 +141,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     const controller = new AbortController();
     controller.abort(new Error("cancel checking"));
     await assert.rejects(
-      client.validate("async () => {}", { signal: controller.signal }),
+      client.validate("async () => {}", controller.signal),
       /cancel checking|aborted/i,
     );
   });
@@ -170,13 +166,13 @@ export function testRuntime(options: RuntimeTestOptions): void {
     );
 
     assert.deepEqual(
-      await client.validate(source, { signal: AbortSignal.timeout(5_000) }),
+      await client.validate(source, AbortSignal.timeout(5_000)),
       { kind: "valid" },
     );
     const outcome = await client.run(source, {
       signal: AbortSignal.timeout(5_000),
       onTelemetry: telemetry.onTelemetry,
-    }).result;
+    });
     assert.deepEqual(outcome, { kind: "success" });
     assert.deepEqual(observedInputs, [{ value: 41 }]);
 
@@ -196,35 +192,35 @@ export function testRuntime(options: RuntimeTestOptions): void {
 
     const syntax = await emptyClient.run("async ({", {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
     assert.equal(syntax.kind, "program-failed");
     assert.equal(syntax.error.name, "SyntaxError");
     assert.match(syntax.error.message, /InvalidSyntax/);
 
     const nonVoid = await emptyClient.run("async () => 42", {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
     assert.equal(nonVoid.kind, "program-failed");
     assert.match(nonVoid.error.message, /must resolve to undefined/);
 
     const factoryFailure = await emptyClient.run(
       `(() => { throw new Error("factory failure"); })()`,
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
     assert.equal(factoryFailure.kind, "program-failed");
     assert.equal(factoryFailure.error.message, "factory failure");
 
     const unknown = await emptyClient.run(
       "async ({ codemode }) => { await codemode.notRegistered({}); }",
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
     assert.equal(unknown.kind, "program-failed");
     assert.match(unknown.error.message, /No code-mode tool is registered/);
 
     const inherited = await emptyClient.run(
       "async ({ codemode }) => { await codemode.toString({}); }",
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
     assert.equal(inherited.kind, "program-failed");
     assert.match(inherited.error.message, /No code-mode tool is registered for toString/);
 
@@ -236,7 +232,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     const toolFailure = await failingClient.run(
       "async ({ codemode }) => { await codemode.fail({}); }",
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
     assert.equal(toolFailure.kind, "program-failed");
     assert.equal(toolFailure.error.message, "tool contract failure");
 
@@ -247,7 +243,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
         } catch {}
       }`,
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
     assert.deepEqual(recovered, { kind: "success" });
 
     const hostileError = await emptyClient.run(`async () => {
@@ -260,7 +256,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
       throw error;
     }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
     assert.equal(hostileError.kind, "program-failed");
     assert.equal(hostileError.error.name, "Error");
     assert.equal(
@@ -272,7 +268,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
       throw { toString() { throw new Error("hostile toString"); } };
     }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
     assert.equal(hostileThrownValue.kind, "program-failed");
     assert.equal(
       hostileThrownValue.error.message,
@@ -282,7 +278,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     const hostileToolError = await failingClient.run(
       "async ({ codemode }) => { await codemode.failHostile({}); }",
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
     assert.equal(hostileToolError.kind, "program-failed");
     assert.equal(
       hostileToolError.error.message,
@@ -304,21 +300,14 @@ export function testRuntime(options: RuntimeTestOptions): void {
         events.push(event);
         throw new Error("telemetry consumer failed");
       },
-    }).result;
+    });
 
     assert.deepEqual(outcome, { kind: "success" });
-    assert.deepEqual(events.map((event) => event.sequence),
-      events.map((_event, index) => index));
     assert.deepEqual(events.map((event) => event.kind), [
-      "execution-started",
-      "runtime-started",
-      "program-started",
       "tool-call-started",
       "tool-call-completed",
-      "runtime-finished",
       "execution-completed",
     ]);
-    assert.ok(events.every((event) => !Number.isNaN(Date.parse(event.timestamp))));
   });
 
   test(`${options.name}: aborts reject execution and do not poison later executions`, async () => {
@@ -331,10 +320,10 @@ export function testRuntime(options: RuntimeTestOptions): void {
       environment: testEnvironment,
     });
     await assert.rejects(
-      client.run("async () => {}", { signal: controller.signal }).result,
+      client.run("async () => {}", { signal: controller.signal }),
     );
     await assert.rejects(
-      client.run("async ({", { signal: controller.signal }).result,
+      client.run("async ({", { signal: controller.signal }),
       /cancel before start/,
     );
 
@@ -351,12 +340,12 @@ export function testRuntime(options: RuntimeTestOptions): void {
     );
     await blocking.started;
     during.abort(new Error("cancel during execution"));
-    await assert.rejects(execution.result);
+    await assert.rejects(execution);
 
     assert.deepEqual(
       await client.run("async () => {}", {
         signal: AbortSignal.timeout(5_000),
-      }).result,
+      }),
       { kind: "success" },
     );
   });
@@ -373,7 +362,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     const result = client.run(
       "async ({ codemode }) => { void codemode.block({}); }",
       { signal: AbortSignal.timeout(5_000) },
-    ).result;
+    );
 
     await blocking.started;
     const outcome = await result;
@@ -394,7 +383,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
       await codemode.waitForFailure({});
     }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
 
     assert.equal(outcome.kind, "program-failed");
     assert.equal(outcome.error.message, "unobserved tool failure");
@@ -404,47 +393,10 @@ export function testRuntime(options: RuntimeTestOptions): void {
       await codemode.waitForFailure({});
     }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
 
     assert.equal(methodRead.kind, "program-failed");
     assert.equal(methodRead.error.message, "unobserved tool failure");
-  });
-
-  test(`${options.name}: a completed unawaited tool call still fails the program`, async () => {
-    const runtime = await options.createRuntime();
-    const client = createClient({
-      runtime,
-      toolbox: createCompletedUnobservedToolbox(),
-      environment: testEnvironment,
-    });
-
-    const outcome = await client.run(`async ({ codemode }) => {
-      void codemode.complete({});
-      await codemode.waitForCompletion({});
-    }`, {
-      signal: AbortSignal.timeout(5_000),
-    }).result;
-
-    assert.equal(outcome.kind, "program-failed");
-    assert.match(outcome.error.message, /must await every tool call/);
-  });
-
-  test(`${options.name}: one client supports isolated concurrent executions`, async () => {
-    const runtime = await options.createRuntime();
-    const client = createClient({
-      runtime,
-      toolbox: createLabelToolbox("shared"),
-      environment: testEnvironment,
-    });
-    const results = await Promise.all([
-      client.run(stringifyTestAgentProgram(labelAgentProgram), {
-        signal: AbortSignal.timeout(5_000),
-      }).result,
-      client.run(stringifyTestAgentProgram(labelAgentProgram), {
-        signal: AbortSignal.timeout(5_000),
-      }).result,
-    ]);
-    assert.deepEqual(results, [{ kind: "success" }, { kind: "success" }]);
   });
 
   test(`${options.name}: client runs an agent program against toolbox tools`, async () => {
@@ -456,7 +408,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     });
     const outcome = await client.run(stringifyTestAgentProgram(weatherAlertAgentProgram), {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
 
     assert.deepEqual(outcome, { kind: "success" });
   });
@@ -475,7 +427,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     });
     const completedEvent = telemetry.next("execution-completed");
 
-    const outcome = await execution.result;
+    const outcome = await execution;
     assert.equal(outcome.kind, "program-failed");
     assert.equal(outcome.error.name, "Error");
     assert.equal(outcome.error.message, "contract failure");
@@ -493,9 +445,10 @@ export function testRuntime(options: RuntimeTestOptions): void {
       environment: testEnvironment,
     });
 
-    const validation = await client.validate("async () => 'not void'", {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const validation = await client.validate(
+      "async () => 'not void'",
+      AbortSignal.timeout(5_000),
+    );
 
     assert.equal(validation.kind, "invalid");
     assert.match(validation.diagnostics[0]?.message ?? "", /Promise<string>.*Promise<void>/);
@@ -510,9 +463,10 @@ export function testRuntime(options: RuntimeTestOptions): void {
       environment: testEnvironment,
     });
 
-    const validation = await client.validate("async ({ codemode }) => { await codemode.getWeather({ location: 123 }); }", {
-      signal: AbortSignal.timeout(5_000),
-    });
+    const validation = await client.validate(
+      "async ({ codemode }) => { await codemode.getWeather({ location: 123 }); }",
+      AbortSignal.timeout(5_000),
+    );
 
     assert.equal(validation.kind, "invalid");
     assert.deepEqual(JSON.parse(JSON.stringify(validation)), validation);
@@ -538,7 +492,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
         await codemode.getWeather({ location: "London" });
       }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
 
     assert.deepEqual(outcome, { kind: "success" });
   });
@@ -557,7 +511,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
         });
       }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
 
     assert.equal(outcome.kind, "program-failed");
     assert.equal(outcome.error.name, "ToolValidationError");
@@ -568,12 +522,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.match(report, /must match format "date"/);
     assert.match(report, /codemode\.listFlights/);
     assert.match(report, /not-a-date/);
-    assert.match(report, /Agent call stack:/);
-    assert.match(report, /<generated-runtime-program>/);
-    assert.ok(
-      report.split("\n").every((line) => line.length <= 220),
-      "validation report should not contain unbounded stack lines",
-    );
+    assert.doesNotMatch(report, /Agent call stack:/);
   });
 
   test(`${options.name}: client.run validates tool output values`, async () => {
@@ -590,7 +539,7 @@ export function testRuntime(options: RuntimeTestOptions): void {
         });
       }`, {
       signal: AbortSignal.timeout(5_000),
-    }).result;
+    });
 
     assert.equal(outcome.kind, "program-failed");
     assert.equal(outcome.error.name, "ToolValidationError");
@@ -600,63 +549,6 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.match(report, /Tool output validation failed for listFlights/);
     assert.match(report, /flights/);
     assert.match(report, /codemode\.listFlights/);
-  });
-
-  test(`${options.name}: concurrent clients on one runtime use independent toolboxes`, async () => {
-    const runtime = await options.createRuntime();
-    const leftClient = createClient({
-      runtime,
-      toolbox: createLabelToolbox("left"),
-      environment: testEnvironment,
-    });
-    const rightClient = createClient({
-      runtime,
-      toolbox: createLabelToolbox("right"),
-      environment: testEnvironment,
-    });
-
-    const outcomes = await Promise.all([
-        leftClient.run(stringifyTestAgentProgram(labelAgentProgram), {
-          signal: AbortSignal.timeout(5_000),
-        }).result,
-        rightClient.run(stringifyTestAgentProgram(labelAgentProgram), {
-          signal: AbortSignal.timeout(5_000),
-        }).result,
-      ]);
-
-    assert.deepEqual(outcomes, [{ kind: "success" }, { kind: "success" }]);
-  });
-
-  test(`${options.name}: client supports parallel tool calls from one agent program`, async () => {
-    const runtime = await options.createRuntime();
-    const client = createClient({
-      runtime,
-      toolbox: createParallelToolbox(),
-      environment: testEnvironment,
-    });
-
-    assert.deepEqual(
-      await client.run(stringifyTestAgentProgram(parallelAgentProgram), {
-        signal: AbortSignal.timeout(5_000),
-      }).result,
-      { kind: "success" },
-    );
-  });
-
-  test(`${options.name}: client supports interleaved calls to different tools`, async () => {
-    const runtime = await options.createRuntime();
-    const client = createClient({
-      runtime,
-      toolbox: createInterleavedToolbox(),
-      environment: testEnvironment,
-    });
-
-    assert.deepEqual(
-      await client.run(stringifyTestAgentProgram(interleavedAgentProgram), {
-        signal: AbortSignal.timeout(5_000),
-      }).result,
-      { kind: "success" },
-    );
   });
 
   test(`${options.name}: client streams typed telemetry before execution completes`, async () => {
@@ -674,19 +566,11 @@ export function testRuntime(options: RuntimeTestOptions): void {
       onTelemetry: telemetry.onTelemetry,
     });
     let resultSettled = false;
-    const result = execution.result.finally(() => {
+    const result = execution.finally(() => {
       resultSettled = true;
     });
 
-    const executionStarted = await telemetry.next("execution-started");
-    assert.equal(executionStarted.executionId, execution.id);
-    assert.equal(executionStarted.sequence, 0);
-
-    const runtimeStarted = await telemetry.next("runtime-started");
-    assert.equal(runtimeStarted.executionId, execution.id);
-
     const programLog = await telemetry.next("program-log");
-    assert.equal(programLog.executionId, execution.id);
     assert.equal(programLog.level, "log");
     assert.match(programLog.message, /^about to wait /);
     assert.equal(programLog.values[0], "about to wait");
@@ -699,7 +583,6 @@ export function testRuntime(options: RuntimeTestOptions): void {
     assert.equal(resultSettled, false);
 
     const toolStarted = await telemetry.next("tool-call-started");
-    assert.equal(toolStarted.executionId, execution.id);
     assert.equal(toolStarted.toolName, "waitForRelease");
     assert.deepEqual(toolStarted.input, { label: "gate" });
     assert.equal(resultSettled, false);
@@ -707,14 +590,12 @@ export function testRuntime(options: RuntimeTestOptions): void {
     telemetryToolbox.release();
 
     const toolCompleted = await telemetry.next("tool-call-completed");
-    assert.equal(toolCompleted.executionId, execution.id);
     assert.equal(toolCompleted.toolCallId, toolStarted.toolCallId);
     assert.deepEqual(toolCompleted.output, { released: true });
 
     assert.deepEqual(await result, { kind: "success" });
 
     const completed = await telemetry.next("execution-completed");
-    assert.equal(completed.executionId, execution.id);
     assert.deepEqual(completed.outcome, { kind: "success" });
   });
 }
@@ -1104,36 +985,6 @@ function createUnobservedFailureToolbox() {
   ]);
 }
 
-function createCompletedUnobservedToolbox() {
-  const completed = createDeferred<void>();
-  return createToolbox([
-    defineTool(
-      "complete",
-      {
-        description: "Complete without being awaited.",
-        inputSchema: EmptyObject,
-        outputSchema: EmptyObject,
-      },
-      async () => {
-        completed.resolve();
-        return {};
-      },
-    ),
-    defineTool(
-      "waitForCompletion",
-      {
-        description: "Wait until the unawaited call has completed.",
-        inputSchema: EmptyObject,
-        outputSchema: EmptyObject,
-      },
-      async () => {
-        await completed.promise;
-        return {};
-      },
-    ),
-  ]);
-}
-
 function createBlockingToolbox() {
   const started = createDeferred<void>();
   return {
@@ -1187,186 +1038,6 @@ const labelAgentProgram: AgentProgram<LabelApi> = async ({
   codemode,
 }) => {
   await codemode.label({ value: "request" });
-};
-
-interface ParallelApi {
-  coordinate(input: { readonly name: string }): Promise<{
-    readonly name: string;
-    readonly observed: string;
-  }>;
-}
-
-const CoordinateInput = testSchema({
-  type: "object",
-  description: "The coordination request.",
-  properties: {
-    name: {
-      type: "string",
-      description: "The requested step name.",
-    },
-  },
-  required: ["name"],
-  additionalProperties: false,
-} as const);
-
-const CoordinateOutput = testSchema({
-  type: "object",
-  description: "The coordination response.",
-  properties: {
-    name: {
-      type: "string",
-      description: "The completed step name.",
-    },
-    observed: {
-      type: "string",
-      description: "What the tool observed before returning.",
-    },
-  },
-  required: ["name", "observed"],
-  additionalProperties: false,
-} as const);
-
-function createParallelToolbox() {
-  let resolveSecondStarted: (() => void) | undefined;
-  const secondStarted = new Promise<void>((resolve) => {
-    resolveSecondStarted = resolve;
-  });
-
-  return createToolbox([
-    defineTool(
-      "coordinate",
-      {
-      description: "Coordinate parallel tool calls.",
-      inputSchema: CoordinateInput,
-      outputSchema: CoordinateOutput,
-      },
-      async (ctx, input): Promise<{ readonly name: string; readonly observed: string }> => {
-        assert.equal(ctx.signal.aborted, false);
-        assertIsCoordinateInput(input);
-
-        if (input.name === "first") {
-          await secondStarted;
-
-          return {
-            name: "first",
-            observed: "second-started",
-          };
-        }
-
-        if (input.name === "second") {
-          resolveSecondStarted?.();
-
-          return {
-            name: "second",
-            observed: "started",
-          };
-        }
-
-        throw new Error(`Unexpected coordinate step: ${input.name}`);
-      },
-    ),
-  ]);
-}
-
-const parallelAgentProgram: AgentProgram<ParallelApi> = async ({
-  codemode,
-}) => {
-  await Promise.all([
-    codemode.coordinate({ name: "first" }),
-    codemode.coordinate({ name: "second" }),
-  ]);
-};
-
-function assertIsCoordinateInput(
-  value: unknown,
-): asserts value is { readonly name: string } {
-  assert.equal(typeof value, "object");
-  assert.notEqual(value, null);
-  assert.equal(typeof (value as { readonly name?: unknown }).name, "string");
-}
-
-interface InterleavedApi {
-  waitForSignal(input: { readonly name: string }): Promise<{ readonly status: string }>;
-  signal(input: { readonly name: string }): Promise<{ readonly status: string }>;
-}
-
-const SignalInput = testSchema({
-  type: "object",
-  description: "The signal request.",
-  properties: {
-    name: {
-      type: "string",
-      description: "The signal name.",
-    },
-  },
-  required: ["name"],
-  additionalProperties: false,
-} as const);
-
-const SignalOutput = testSchema({
-  type: "object",
-  description: "The signal response.",
-  properties: {
-    status: {
-      type: "string",
-      description: "The signal status.",
-    },
-  },
-  required: ["status"],
-  additionalProperties: false,
-} as const);
-
-function createInterleavedToolbox() {
-  let releaseWaiter: (() => void) | undefined;
-  const signalReceived = new Promise<void>((resolve) => {
-    releaseWaiter = resolve;
-  });
-
-  return createToolbox([
-    defineTool(
-      "waitForSignal",
-      {
-      description: "Wait for a signal.",
-      inputSchema: SignalInput,
-      outputSchema: SignalOutput,
-      },
-      async (ctx, input): Promise<{ readonly status: string }> => {
-        assert.equal(ctx.signal.aborted, false);
-        assert.deepEqual(input, { name: "gate" });
-        await signalReceived;
-
-        return {
-          status: "released",
-        };
-      },
-    ),
-    defineTool(
-      "signal",
-      {
-      description: "Send a signal.",
-      inputSchema: SignalInput,
-      outputSchema: SignalOutput,
-      },
-      async (ctx, input): Promise<{ readonly status: string }> => {
-        assert.equal(ctx.signal.aborted, false);
-        assert.deepEqual(input, { name: "gate" });
-        releaseWaiter?.();
-
-        return {
-          status: "sent",
-        };
-      },
-    ),
-  ]);
-}
-
-const interleavedAgentProgram: AgentProgram<InterleavedApi> = async ({
-  codemode,
-}) => {
-  await Promise.all([
-    codemode.waitForSignal({ name: "gate" }),
-    codemode.signal({ name: "gate" }),
-  ]);
 };
 
 interface TelemetryApi {

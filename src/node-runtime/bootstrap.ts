@@ -1,17 +1,9 @@
 import type { Program } from "../core/runtime.ts";
-import { programEntrypointName } from "../core/runtime.ts";
 
 export const nodeChannelFd = 3;
 export const nodeChannelFdEnvironmentVariable = "CODE_MODE_CHANNEL_FD";
 
 export function createNodeBootstrapSource(program: Program): string {
-  switch (program.kind) {
-    case "javascript-module":
-      return createJavaScriptModuleBootstrap(program.source);
-  }
-}
-
-function createJavaScriptModuleBootstrap(source: string): string {
   return `
 import { once } from "node:events";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -52,7 +44,7 @@ const hooks = registerHooks({
       return {
         format: "module",
         shortCircuit: true,
-        source: ${JSON.stringify(source)},
+        source: ${JSON.stringify(program.source)},
       };
     }
     return nextLoad(url, context);
@@ -64,10 +56,10 @@ try {
 } finally {
   hooks.deregister();
 }
-const start = program[${JSON.stringify(programEntrypointName)}];
+const start = program.startProgram;
 
 if (typeof start !== "function") {
-  throw new Error("Code-mode source program must export ${programEntrypointName}()");
+  throw new Error("Code-mode source program must export startProgram()");
 }
 
 await start({

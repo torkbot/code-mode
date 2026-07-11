@@ -14,14 +14,12 @@ test("execution terminates a live runtime when protocol processing fails", async
     kind: "tool-call",
     id: "call-1",
     input: {},
-    stack: "Error: Tool call stack",
   });
   const validToolCall = encodeProgramMessage({
     kind: "tool-call",
     id: "call-before-failure",
     name: "hold",
     input: {},
-    stack: "Error: Tool call stack",
   });
   let terminateReason: string | undefined;
   let toolSignal: AbortSignal | undefined;
@@ -92,7 +90,7 @@ test("execution terminates a live runtime when protocol processing fails", async
     },
   });
 
-  const result = client.run("async () => {}").result;
+  const result = client.run("async () => {}", { signal: AbortSignal.timeout(5_000) });
   await assert.rejects(
     result,
     /Invalid code-mode program message/,
@@ -110,7 +108,6 @@ test("a terminal program error does not wait for a non-cooperative tool call", a
     id: "call-1",
     name: "hold",
     input: {},
-    stack: "Error: Tool call stack",
   });
   const programError = encodeProgramMessage({
     kind: "program-error",
@@ -184,7 +181,9 @@ test("a terminal program error does not wait for a non-cooperative tool call", a
     },
   });
 
-  const outcome = await client.run("async () => {}").result;
+  const outcome = await client.run("async () => {}", {
+    signal: AbortSignal.timeout(5_000),
+  });
 
   assert.equal(outcome.kind, "program-failed");
   assert.equal(outcome.error.message, "agent failed");
@@ -223,7 +222,9 @@ test("execution terminates a runtime after a completed protocol message", async 
     },
   });
 
-  assert.deepEqual(await client.run("async () => {}").result, { kind: "success" });
+  assert.deepEqual(await client.run("async () => {}", {
+    signal: AbortSignal.timeout(5_000),
+  }), { kind: "success" });
   assert.equal(terminateReason, "Code-mode program completed");
   assert.deepEqual(await finished, { kind: "closed" });
 });
@@ -234,7 +235,6 @@ test("failed tool response writes reject without completion telemetry", async ()
     id: "call-1",
     name: "complete",
     input: {},
-    stack: "Error: Tool call stack",
   });
   let finishRuntime: ((result: RuntimeFinished) => void) | undefined;
   const finished = new Promise<RuntimeFinished>((resolve) => {
@@ -292,12 +292,13 @@ test("failed tool response writes reject without completion telemetry", async ()
 
   await assert.rejects(
     client.run("async () => {}", {
+      signal: AbortSignal.timeout(5_000),
       onTelemetry(event) {
         if (event.kind.startsWith("tool-call-")) {
           toolEvents.push(event.kind);
         }
       },
-    }).result,
+    }),
     /runtime channel is closed/,
   );
 
@@ -310,7 +311,6 @@ test("execution rejects completion while a tool call is pending", async () => {
     id: "call-1",
     name: "missing",
     input: {},
-    stack: "Error: Tool call stack",
   });
   const completed = encodeProgramMessage({ kind: "completed" });
   let finishRuntime: ((result: RuntimeFinished) => void) | undefined;
@@ -346,7 +346,7 @@ test("execution rejects completion while a tool call is pending", async () => {
   });
 
   await assert.rejects(
-    client.run("async () => {}").result,
+    client.run("async () => {}", { signal: AbortSignal.timeout(5_000) }),
     /completed while tool calls were still running/,
   );
 });

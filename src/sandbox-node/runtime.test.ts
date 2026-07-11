@@ -57,7 +57,6 @@ test("sandbox-node observes a signal aborted during spawn", async () => {
 
   const instance = await runtime.start({
     program: {
-      kind: "javascript-module",
       source: "export async function startProgram() {}",
     },
     signal: controller.signal,
@@ -75,7 +74,6 @@ test("sandbox-node bounds stderr retained for process failures", async () => {
   });
   const instance = await runtime.start({
     program: {
-      kind: "javascript-module",
       source: `export async function startProgram(channel) {
         await channel.outgoing.close();
         process.stderr.write("x".repeat(100_000) + "stderr sentinel");
@@ -109,7 +107,7 @@ test("sandbox-node resolves package imports from the runtime working directory",
     await client.run(`async () => {
       const bson = await import("bson");
       if (typeof bson.BSON.serialize !== "function") throw new Error("missing bson");
-    }`, { signal: AbortSignal.timeout(5_000) }).result,
+    }`, { signal: AbortSignal.timeout(5_000) }),
     { kind: "success" },
   );
 });
@@ -128,7 +126,7 @@ test("sandbox-node escalates termination when a program ignores SIGTERM", async 
     await client.run(`async () => {
       process.on("SIGTERM", () => {});
       setInterval(() => {}, 1_000);
-    }`, { signal: AbortSignal.timeout(5_000) }).result,
+    }`, { signal: AbortSignal.timeout(5_000) }),
     { kind: "success" },
   );
 });

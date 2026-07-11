@@ -23,8 +23,8 @@ const terminationGracePeriodMilliseconds = 1_000;
 export class HostNodeRuntime implements Runtime {
   readonly #nodePath: string;
 
-  constructor(options: { readonly nodePath: string }) {
-    this.#nodePath = options.nodePath;
+  constructor(nodePath: string) {
+    this.#nodePath = nodePath;
   }
 
   async start(req: StartRequest): Promise<RuntimeInstance> {
@@ -45,6 +45,11 @@ export class HostNodeRuntime implements Runtime {
       child.kill("SIGTERM");
       throw new Error("Host Node.js runtime did not create stdin");
     }
+    const stderrStream = child.stderr;
+    if (stderrStream === null) {
+      child.kill("SIGTERM");
+      throw new Error("Host Node.js runtime did not create stderr");
+    }
 
     const channel: ByteChannel = {
       incoming: readableChunks(fd3),
@@ -52,8 +57,8 @@ export class HostNodeRuntime implements Runtime {
     };
 
     let stderr = "";
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
+    stderrStream.setEncoding("utf8");
+    stderrStream.on("data", (chunk: string) => {
       stderr = appendTextTail(stderr, chunk);
     });
 

@@ -16,16 +16,12 @@ export interface CreateClientRequest {
 }
 
 export interface Client {
-  validate(source: string, options?: ValidateOptions): Promise<ValidationResult>;
-  run(source: string, options?: RunOptions): ClientExecution;
-}
-
-export interface ValidateOptions {
-  readonly signal?: AbortSignal;
+  validate(source: string, signal: AbortSignal): Promise<ValidationResult>;
+  run(source: string, options: RunOptions): Promise<RunOutcome>;
 }
 
 export interface RunOptions {
-  readonly signal?: AbortSignal;
+  readonly signal: AbortSignal;
   readonly onTelemetry?: TelemetryCallback;
 }
 
@@ -37,11 +33,6 @@ export type ValidationResult =
       readonly report: string;
     };
 
-export interface ClientExecution {
-  readonly id: string;
-  readonly result: Promise<RunOutcome>;
-}
-
 export function createClient(req: CreateClientRequest): Client {
   const tools = getToolboxTools(req.toolbox);
   assertEnvironment(req.environment);
@@ -49,13 +40,13 @@ export function createClient(req: CreateClientRequest): Client {
   return {
     async validate(
       source: string,
-      options: ValidateOptions = {},
+      signal: AbortSignal,
     ): Promise<ValidationResult> {
       const typecheckFailure = await validateAgentSource({
         source,
         typeDefinitions: req.toolbox.typeDefinitions,
         typeDefinitionFiles: req.environment.typeDefinitionFiles,
-        signal: options.signal ?? neverAbortedSignal,
+        signal,
       });
 
       if (typecheckFailure === undefined) {
@@ -68,24 +59,15 @@ export function createClient(req: CreateClientRequest): Client {
         report: typecheckFailure.report,
       };
     },
-    run(source: string, options: RunOptions = {}): ClientExecution {
-      const id = createExecutionId();
-      const telemetry = createTelemetryEmitter(id, options.onTelemetry);
-      const result = execute({
-        executionId: id,
+    run(source: string, options: RunOptions): Promise<RunOutcome> {
+      const emitTelemetry = createTelemetryEmitter(options.onTelemetry);
+      return execute({
         runtime: req.runtime,
-        signal: options.signal ?? neverAbortedSignal,
+        signal: options.signal,
         agentSource: source,
         tools,
-        emitTelemetry(event) {
-          telemetry.emit(event);
-        },
-      }).then((executionResult) => executionResult.outcome);
-
-      return {
-        id,
-        result,
-      };
+        emitTelemetry,
+      });
     },
   };
 }
@@ -102,10 +84,4 @@ function assertEnvironment(environment: CodeModeEnvironment): void {
   if (!Array.isArray(environment.typeDefinitionFiles)) {
     throw new Error("Code-mode environment typeDefinitionFiles must be an array");
   }
-}
-
-const neverAbortedSignal = new AbortController().signal;
-
-function createExecutionId(): string {
-  return `exec_${globalThis.crypto.randomUUID()}`;
 }

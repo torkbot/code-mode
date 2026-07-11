@@ -420,7 +420,7 @@ function toolDescriptionLines(tool: AgentToolDefinition): readonly string[] {
     lines.push("", `@param input ${tool.inputSchema.description}`);
   }
   if (tool.outputSchema.description !== undefined) {
-    if (lines.at(-1) !== "" && !lines.at(-1)?.startsWith("@param ")) {
+    if (tool.inputSchema.description === undefined) {
       lines.push("");
     }
     lines.push(`@returns ${tool.outputSchema.description}`);
@@ -483,7 +483,7 @@ function printPropertyName(name: string): string {
 
 function printJSDoc(indent: string, lines: readonly string[]): string[] {
   if (lines.length === 0) return [];
-  if (lines.length === 1) return [`${indent}/** ${escapeJSDoc(lines[0] ?? "")} */`];
+  if (lines.length === 1) return [`${indent}/** ${escapeJSDoc(lines[0]!)} */`];
   return [
     `${indent}/**`,
     ...lines.map((line) => line === "" ? `${indent} *` : `${indent} * ${escapeJSDoc(line)}`),

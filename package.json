@@ -21,14 +21,6 @@
       "types": "./dist/host-node/index.d.ts",
       "default": "./dist/host-node/index.js"
     },
-    "./host-node/node24": {
-      "types": "./dist/host-node/node24.d.ts",
-      "default": "./dist/host-node/node24.js"
-    },
-    "./runtime": {
-      "types": "./dist/runtime/index.d.ts",
-      "default": "./dist/runtime/index.js"
-    },
     "./sandbox-node": {
       "types": "./dist/sandbox-node/index.d.ts",
       "default": "./dist/sandbox-node/index.js"

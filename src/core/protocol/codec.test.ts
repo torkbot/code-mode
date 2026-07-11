@@ -39,7 +39,6 @@ test("protocol codec reads chunked BSON program messages", async () => {
     input: {
       query: "London",
     },
-    stack: "Error: Tool call stack",
   });
   const right = encodeProgramMessage({
     kind: "completed",
@@ -61,7 +60,6 @@ test("protocol codec reads chunked BSON program messages", async () => {
       input: {
         query: "London",
       },
-      stack: "Error: Tool call stack",
     },
     {
       kind: "completed",
@@ -93,14 +91,12 @@ test("protocol codec rejects malformed program messages", async () => {
       kind: "tool-call",
       id: "call-1",
       input: {},
-      stack: "Error: Tool call stack",
     },
     {
       kind: "tool-call",
       id: "call-1",
       name: 42,
       input: {},
-      stack: "Error: Tool call stack",
     },
     {
       kind: "completed",

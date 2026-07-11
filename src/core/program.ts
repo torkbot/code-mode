@@ -1,5 +1,4 @@
-import type { Program, Runtime, RuntimeInstance } from "./runtime.ts";
-import { programEntrypointName } from "./runtime.ts";
+import type { Program } from "./runtime.ts";
 import { bsonRuntimeSource } from "../runtime-code/bson.ts";
 import {
   agentProgramFactoryName,
@@ -17,47 +16,15 @@ import {
   maximumTelemetryErrorStackLength,
 } from "./telemetry.ts";
 
-export interface AgentProgramScope<TApi = unknown> {
-  readonly codemode: TApi;
-}
-
-export type AgentProgram<TApi = unknown> = (
-  scope: AgentProgramScope<TApi>,
-) => Promise<void>;
-
-export interface CreateProgramRequest {
-  readonly agentSource: string;
-}
-
-export interface StartProgramRequest {
-  readonly runtime: Runtime;
-  readonly signal: AbortSignal;
-  readonly agentSource: string;
-}
-
-export function createProgram(req: CreateProgramRequest): Program {
-  const transpilation = transpileAgentSource(req.agentSource);
+export function createProgram(agentSource: string): Program {
+  const transpilation = transpileAgentSource(agentSource);
   if (transpilation.kind === "invalid") {
     throw new AgentSourceSyntaxError(transpilation.report);
   }
 
   return {
-    kind: "javascript-module",
     source: createRuntimeProgramSource(transpilation.source),
   };
-}
-
-export async function startProgram(
-  req: StartProgramRequest,
-): Promise<RuntimeInstance> {
-  const program = createProgram({
-    agentSource: req.agentSource,
-  });
-
-  return await req.runtime.start({
-    program,
-    signal: req.signal,
-  });
 }
 
 export class AgentSourceSyntaxError extends SyntaxError {
@@ -136,7 +103,7 @@ function createFlattedStringify() {
   };
 }
 
-export async function ${programEntrypointName}(channel) {
+export async function startProgram(channel) {
   let nextToolCallId = 0;
   const responses = readBsonFrames(channel.incoming)[Symbol.asyncIterator]();
   const pendingToolCalls = new Map();
@@ -164,14 +131,13 @@ export async function ${programEntrypointName}(channel) {
                 id,
                 name: property,
                 input,
-                stack: captureToolCallStack(),
               });
             } catch (error) {
               pendingToolCalls.delete(id);
               throw error;
             }
 
-            return await response;
+            return response;
           })();
           return trackToolCall(id, call);
         };
@@ -180,10 +146,6 @@ export async function ${programEntrypointName}(channel) {
   };
 
   try {
-    emitTelemetry({
-      kind: "program-started",
-    });
-
     const run = ${agentProgramFactoryName}(createProgramConsole(emitProgramLog));
     const result = await run(scope);
     if (result !== undefined) {
@@ -328,11 +290,6 @@ export async function ${programEntrypointName}(channel) {
       kind: "telemetry",
       event,
     }).catch(() => {});
-  }
-
-  function captureToolCallStack() {
-    const stack = new Error("Tool call stack").stack;
-    return typeof stack === "string" ? stack : "";
   }
 
   function emitProgramLog(level, values) {

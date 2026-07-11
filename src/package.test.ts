@@ -23,14 +23,8 @@ test("public root and host-node sub-path exports are declared", async () => {
     types: "./dist/host-node/index.d.ts",
     default: "./dist/host-node/index.js",
   });
-  assert.deepEqual(packageJson.exports["./host-node/node24"], {
-    types: "./dist/host-node/node24.d.ts",
-    default: "./dist/host-node/node24.js",
-  });
-  assert.deepEqual(packageJson.exports["./runtime"], {
-    types: "./dist/runtime/index.d.ts",
-    default: "./dist/runtime/index.js",
-  });
+  assert.equal(packageJson.exports["./host-node/node24"], undefined);
+  assert.equal(packageJson.exports["./runtime"], undefined);
   assert.deepEqual(packageJson.exports["./sandbox-node"], {
     types: "./dist/sandbox-node/index.d.ts",
     default: "./dist/sandbox-node/index.js",
@@ -63,17 +57,11 @@ test("public root export is focused on toolbox and client APIs", async () => {
   assert.match(rootExport, /createClient/);
   assert.match(rootExport, /Toolbox/);
   assert.match(rootExport, /Client/);
-  assert.match(rootExport, /ClientExecution/);
-  assert.match(rootExport, /ValidateOptions/);
-  assert.match(rootExport, /ValidationResult/);
-  assert.match(rootExport, /TypecheckDiagnostic/);
   assert.match(rootExport, /RunOutcome/);
-  assert.match(rootExport, /TelemetryCallback/);
   assert.match(rootExport, /TelemetryEvent/);
-  assert.match(rootExport, /AgentProgram/);
   assert.match(rootExport, /Runtime/);
-  assert.match(rootExport, /TypeDefinitionFile/);
   assert.match(rootExport, /CodeModeEnvironment/);
+  assert.match(rootExport, /ToolSchema/);
 
   assert.doesNotMatch(rootExport, /CodeModeRuntime/);
 
@@ -108,8 +96,7 @@ test("runtime contract tests exercise only the public contract surface", async (
 
   assert.match(contractTest, /from "\.\.\/index\.ts"/);
   assert.match(contractTest, /testRuntime/);
-  assert.match(contractTest, /\(\) => Promise<Runtime>/);
-  assert.match(contractTest, /readonly createRuntime: RuntimeFactory/);
+  assert.match(contractTest, /createRuntime\(\): Promise<Runtime>/);
   assert.match(contractTest, /createClient/);
   assert.match(contractTest, /client\.validate/);
   assert.match(contractTest, /client\.run\(stringifyTestAgentProgram/);

@@ -39,12 +39,6 @@ export const ProgramLogLevelSchema = Type.Union([
 export const ProgramTelemetryEventSchema = Type.Union([
   Type.Object(
     {
-      kind: Type.Literal("program-started"),
-    },
-    { additionalProperties: false },
-  ),
-  Type.Object(
-    {
       kind: Type.Literal("program-log"),
       level: ProgramLogLevelSchema,
       message: Type.String(),
@@ -61,7 +55,6 @@ export const ProgramMessageSchema = Type.Union([
       id: Type.String(),
       name: Type.String(),
       input: Type.Unknown(),
-      stack: Type.String(),
     },
     { additionalProperties: false },
   ),

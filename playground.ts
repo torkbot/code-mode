@@ -14,7 +14,10 @@ async function main() {
         type: "object",
         properties: {
           source: { type: "string", description: "The source airport code." },
-          dest: { type: "string", description: "The destination airport code." },
+          dest: {
+            type: "string",
+            description: "The destination airport code.",
+          },
           departureDate: {
             type: "string",
             description: "The date of the departure.",
@@ -55,7 +58,7 @@ async function main() {
   );
   const toolbox = createToolbox([listFlights]);
 
-  const runtime = new HostNodeRuntime({ nodePath: process.execPath });
+  const runtime = new HostNodeRuntime(process.execPath);
 
   const client = createClient({
     runtime,
@@ -77,9 +80,14 @@ async function main() {
     });
   }`;
 
-  console.dir(await client.validate(source));
+  console.dir(await client.validate(source, AbortSignal.timeout(5_000)));
 
-  console.dir(await client.run(source).result);
+  const outcome = await client.run(source, {
+    signal: AbortSignal.timeout(5_000),
+  });
+  if (outcome.kind === "program-failed" && outcome.error.details !== null) {
+    console.dir(outcome.error.details.report);
+  }
 }
 
 main().catch((e) => {

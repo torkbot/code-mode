@@ -3,23 +3,11 @@ export interface StartRequest {
   readonly signal: AbortSignal;
 }
 
-export type Program = JavaScriptModuleProgram;
-
-export interface JavaScriptModuleProgram {
-  readonly kind: "javascript-module";
+export interface Program {
   /**
    * Self-contained ESM source that exports startProgram(channel).
    */
   readonly source: string;
-}
-
-export const programEntrypointName = "startProgram";
-
-export interface RuntimeProgramModule {
-  /**
-   * Runs the generated code-mode program over the byte channel supplied by the runtime adapter.
-   */
-  startProgram(channel: ByteChannel): Promise<void>;
 }
 
 export interface Runtime {

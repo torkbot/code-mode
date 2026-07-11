@@ -50,7 +50,7 @@ const environment = {
 
 const client = createClient({
   toolbox,
-  runtime: new HostNodeRuntime({ nodePath: process.execPath }),
+  runtime: new HostNodeRuntime(process.execPath),
   environment,
 });
 
@@ -62,16 +62,15 @@ const source = `async ({ codemode }: AgentProgramScope) => {
   console.log(weather.conditions);
 }`;
 
-const validation = await client.validate(source, { signal });
+const validation = await client.validate(source, signal);
 if (validation.kind === "invalid") {
   return validation.report;
 }
 
-const execution = client.run(source, {
+const outcome = await client.run(source, {
   signal,
   onTelemetry: recordEvent,
 });
-const outcome = await execution.result;
 ```
 
 `HostNodeRuntime` is not a sandbox. Use it for trusted programs and integration
@@ -121,16 +120,16 @@ console methods, so logging checks consistently across environments.
 interface Client {
   validate(
     source: string,
-    options?: { readonly signal?: AbortSignal },
+    signal: AbortSignal,
   ): Promise<ValidationResult>;
 
   run(
     source: string,
-    options?: {
-      readonly signal?: AbortSignal;
-      readonly onTelemetry?: TelemetryCallback;
+    options: {
+      readonly signal: AbortSignal;
+      readonly onTelemetry?: (event: TelemetryEvent) => void;
     },
-  ): ClientExecution;
+  ): Promise<RunOutcome>;
 }
 ```
 
@@ -162,11 +161,6 @@ agent skips checking.
 ## Outcomes
 
 ```ts
-interface ClientExecution {
-  readonly id: string;
-  readonly result: Promise<RunOutcome>;
-}
-
 type RunOutcome =
   | { readonly kind: "success" }
   | { readonly kind: "program-failed"; readonly error: TelemetryError };
@@ -174,8 +168,8 @@ type RunOutcome =
 
 Syntax errors, runtime errors, non-void returns, unknown tool calls, handler
 errors, and input/output validation errors resolve as `program-failed` outcomes.
-Broken runtime transport and violated library invariants reject
-`execution.result`. Aborting an execution rejects it after the runtime is
+Broken runtime transport and violated library invariants reject the promise.
+Aborting an execution rejects it after the runtime is
 terminated.
 
 Validation failures include a bounded source-framed report. Runtime tool
@@ -184,12 +178,12 @@ validation failures also expose a report through
 
 ## Telemetry
 
-Every event has an execution id, monotonic sequence, and timestamp. Events cover
-execution/runtime/program start, console logs, tool start/completion/failure,
-runtime finish, and terminal execution completion/failure.
+Events cover console logs, tool start/completion/failure, and terminal execution
+completion/failure.
 
 ```ts
-const execution = client.run(source, {
+const outcome = await client.run(source, {
+  signal,
   onTelemetry(event) {
     if (event.kind === "tool-call-started") {
       console.log(event.toolName, event.input);
@@ -204,13 +198,12 @@ execution.
 
 ## Runtime Contract
 
-Runtime authors import contracts from `@torkbot/code-mode/runtime`:
+Runtime authors import `Runtime` from `@torkbot/code-mode`:
 
 ```ts
 interface Runtime {
   start(request: {
     readonly program: {
-      readonly kind: "javascript-module";
       readonly source: string;
     };
     readonly signal: AbortSignal;
@@ -251,7 +244,7 @@ requires that as an implementation detail.
 ### Host Node.js
 
 ```ts
-const runtime = new HostNodeRuntime({ nodePath: process.execPath });
+const runtime = new HostNodeRuntime(process.execPath);
 ```
 
 The required path is used to spawn a child Node.js process. The generated module

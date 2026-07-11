@@ -17,26 +17,20 @@ import {
 } from "./program.ts";
 import type {
   TelemetryError,
-  TelemetryEventInput,
+  TelemetryEvent,
 } from "./telemetry.ts";
 import { errorFromUnknown } from "./telemetry.ts";
 import type {
   ExecutableToolDefinition,
   ExecutableToolDefinitions,
-  ToolSchema,
 } from "./types.ts";
 
 export interface ExecuteRequest {
-  readonly executionId: string;
   readonly runtime: Runtime;
   readonly signal: AbortSignal;
   readonly agentSource: string;
   readonly tools: ExecutableToolDefinitions;
-  emitTelemetry(event: TelemetryEventInput): void;
-}
-
-export interface ExecuteResult {
-  readonly outcome: RunOutcome;
+  emitTelemetry(event: TelemetryEvent): void;
 }
 
 export type RunOutcome =
@@ -45,17 +39,13 @@ export type RunOutcome =
 
 const maxValidationErrors = 8;
 const maxValidationReportLength = 8_000;
-const maxStackLines = 8;
-const maxStackLineLength = 180;
 
-export async function execute(req: ExecuteRequest): Promise<ExecuteResult> {
-  req.emitTelemetry({ kind: "execution-started" });
-
+export async function execute(req: ExecuteRequest): Promise<RunOutcome> {
   try {
     const result = await executeInner(req);
     req.emitTelemetry({
       kind: "execution-completed",
-      outcome: result.outcome,
+      outcome: result,
     });
     return result;
   } catch (error) {
@@ -69,21 +59,19 @@ export async function execute(req: ExecuteRequest): Promise<ExecuteResult> {
 
 async function executeInner(
   req: ExecuteRequest,
-): Promise<ExecuteResult> {
+): Promise<RunOutcome> {
   req.signal.throwIfAborted();
 
   let program;
   try {
-    program = createProgram({ agentSource: req.agentSource });
+    program = createProgram(req.agentSource);
   } catch (error) {
     if (!(error instanceof AgentSourceSyntaxError)) {
       throw error;
     }
     return {
-      outcome: {
-        kind: "program-failed",
-        error: errorFromUnknown(error),
-      },
+      kind: "program-failed",
+      error: errorFromUnknown(error),
     };
   }
 
@@ -121,8 +109,7 @@ async function runRuntimeInstance(
   instance: Awaited<ReturnType<Runtime["start"]>>,
   toolSignal: AbortSignal,
   toolCancellation: AbortController,
-): Promise<ExecuteResult> {
-  req.emitTelemetry({ kind: "runtime-started" });
+): Promise<RunOutcome> {
   const pendingToolCalls = new Set<Promise<void>>();
   const toolCallFailure = Promise.withResolvers<never>();
   let writeQueue: Promise<void> = Promise.resolve();
@@ -159,7 +146,7 @@ async function runRuntimeInstance(
       await writeResponse({
         kind: "tool-error",
         id: message.id,
-        error: serializeProgramError(error),
+        error: errorFromUnknown(error),
       });
       return;
     }
@@ -170,7 +157,6 @@ async function runRuntimeInstance(
         tool,
         value: message.input,
         agentSource: req.agentSource,
-        callStack: message.stack,
       });
       toolSignal.throwIfAborted();
       const result = await tool.execute({
@@ -182,7 +168,6 @@ async function runRuntimeInstance(
         tool,
         value: result,
         agentSource: req.agentSource,
-        callStack: message.stack,
       });
       await writeResponse({
         kind: "tool-result",
@@ -209,7 +194,7 @@ async function runRuntimeInstance(
       await writeResponse({
         kind: "tool-error",
         id: message.id,
-        error: serializeProgramError(error),
+        error: errorFromUnknown(error),
       });
     }
   };
@@ -258,13 +243,11 @@ async function runRuntimeInstance(
       } catch {
         // The program may have closed the channel after sending its terminal error.
       }
-      await assertRuntimeClosed(instance.finished, req.emitTelemetry);
+      await assertRuntimeClosed(instance.finished);
 
       return {
-        outcome: {
-          kind: "program-failed",
-          error: message.error,
-        },
+        kind: "program-failed",
+        error: message.error,
       };
     }
 
@@ -282,17 +265,13 @@ async function runRuntimeInstance(
       } catch {
         // The program may have closed the channel after sending completion.
       }
-      await assertRuntimeClosed(instance.finished, req.emitTelemetry);
+      await assertRuntimeClosed(instance.finished);
 
-      return {
-        outcome: {
-          kind: "success",
-        },
-      };
+      return { kind: "success" };
     }
   }
 
-  await assertRuntimeClosed(instance.finished, req.emitTelemetry);
+  await assertRuntimeClosed(instance.finished);
 
   throw new Error("Code-mode execution finished without producing an outcome");
 }
@@ -302,75 +281,55 @@ async function validateToolValue(req: {
   readonly tool: ExecutableToolDefinition;
   readonly value: unknown;
   readonly agentSource: string;
-  readonly callStack: string;
 }): Promise<unknown> {
   const schema = req.phase === "input" ? req.tool.inputSchema : req.tool.outputSchema;
-  const validation = await validateAgainstSchema(schema, req.value);
+  const validation = await schema["~standard"].validate(req.value);
 
   if ("value" in validation) {
     return validation.value;
   }
 
+  const issues = validation.issues.map((issue) => (
+    `${formatStandardSchemaPath(issue.path)}: ${issue.message}`
+  ));
   throw new ToolValidationError(
     req.tool.name,
     req.phase,
     formatToolValidationReport({
-      ...req,
-      issues: validation.issues,
+      phase: req.phase,
+      toolName: req.tool.name,
+      agentSource: req.agentSource,
+      issues,
     }),
   );
 }
 
-async function validateAgainstSchema(
-  schema: ToolSchema,
-  value: unknown,
-): Promise<SchemaValidationResult> {
-  const result = await schema["~standard"].validate(value);
-
-  if ("value" in result) {
-    return { value: result.value };
-  }
-
-  return {
-    issues: result.issues.map((issue) => ({
-      path: formatStandardSchemaPath(issue.path),
-      message: issue.message,
-    })),
-  };
-}
-
 function formatToolValidationReport(req: {
   readonly phase: "input" | "output";
-  readonly tool: ExecutableToolDefinition;
-  readonly issues: readonly SchemaValidationIssue[];
+  readonly toolName: string;
+  readonly issues: readonly string[];
   readonly agentSource: string;
-  readonly callStack: string;
 }): string {
-  const issueLines = req.issues.slice(0, maxValidationErrors).map((issue) => (
-    `- ${issue.path}: ${issue.message}`
-  ));
+  const issueLines = req.issues.slice(0, maxValidationErrors).map((issue) => `- ${issue}`);
 
   if (req.issues.length > maxValidationErrors) {
     issueLines.push(`- ... ${req.issues.length - maxValidationErrors} additional issue(s) omitted.`);
   }
 
   return truncateValidationReport([
-    `Tool ${req.phase} validation failed for ${req.tool.name}.`,
+    `Tool ${req.phase} validation failed for ${req.toolName}.`,
     "",
     "Schema errors:",
     ...issueLines,
     "",
     "Agent source excerpt:",
-    ...formatToolCallExcerpt(req.agentSource, req.tool.name),
-    "",
-    "Agent call stack:",
-    ...formatCallStack(req.callStack),
+    ...formatToolCallExcerpt(req.agentSource, req.toolName),
   ].join("\n"));
 }
 
 function formatToolCallExcerpt(source: string, toolName: string): readonly string[] {
   const lines = source.split("\n");
-  const pattern = new RegExp(`\\bcodemode\\s*\\.\\s*${escapeRegExp(toolName)}\\b`);
+  const pattern = new RegExp(`\\bcodemode\\s*\\.\\s*${toolName}\\b`);
   const index = lines.findIndex((line) => pattern.test(line));
 
   if (index === -1) {
@@ -396,139 +355,6 @@ function formatToolCallExcerpt(source: string, toolName: string): readonly strin
   return frame;
 }
 
-function formatCallStack(stack: string): readonly string[] {
-  if (stack.trim() === "") {
-    return ["  <stack unavailable>"];
-  }
-
-  return stack
-    .split("\n")
-    .map(formatStackLine)
-    .filter((line) => line.trim() !== "")
-    .slice(0, maxStackLines)
-    .map((line) => `  ${line}`);
-}
-
-function formatStackLine(line: string): string {
-  const trimmed = line.trim();
-  const frame = parseStackFrame(trimmed);
-
-  if (frame === undefined) {
-    return truncateStackLine(trimmed);
-  }
-
-  const location = formatStackLocation(frame.location);
-  return truncateStackLine(frame.name === undefined
-    ? `at ${location}`
-    : `at ${frame.name} (${location})`);
-}
-
-function parseStackFrame(line: string): StackFrame | undefined {
-  if (!line.startsWith("at ")) {
-    return undefined;
-  }
-
-  const frame = line.slice(3);
-  const named = /^(?<name>.*?) \((?<location>.*)\)$/.exec(frame);
-  const namedGroups = named?.groups;
-  const namedLocation = namedGroups?.["location"];
-
-  if (namedLocation !== undefined) {
-    const name = namedGroups?.["name"];
-    return name === undefined
-      ? { location: namedLocation }
-      : { name, location: namedLocation };
-  }
-
-  if (frame.length > 0) {
-    return {
-      location: frame,
-    };
-  }
-
-  return undefined;
-}
-
-function formatStackLocation(location: string): string {
-  const parsed = parseStackLocation(location);
-
-  if (parsed === undefined) {
-    return truncateStackLine(location);
-  }
-
-  const source = formatStackSource(parsed.source);
-  return parsed.line === undefined
-    ? source
-    : `${source}:${parsed.line}${parsed.column === undefined ? "" : `:${parsed.column}`}`;
-}
-
-function parseStackLocation(location: string): StackLocation | undefined {
-  const match = /^(?<source>.*?)(?::(?<line>\d+))?(?::(?<column>\d+))?$/.exec(location);
-  const groups = match?.groups;
-  const source = groups?.["source"];
-
-  if (source === undefined) {
-    return undefined;
-  }
-
-  const line = groups?.["line"];
-  const column = groups?.["column"];
-  return {
-    source,
-    ...(line === undefined ? {} : { line }),
-    ...(column === undefined ? {} : { column }),
-  };
-}
-
-function formatStackSource(source: string): string {
-  if (source.length === 0) {
-    return "<unknown>";
-  }
-  if (
-    source === ".code-mode-runtime-program.mjs"
-    || source.endsWith("/.code-mode-runtime-program.mjs")
-  ) {
-    return "<generated-runtime-program>";
-  }
-
-  try {
-    const url = new URL(source);
-
-    if (url.protocol === "data:" || url.protocol === "blob:") {
-      return "<generated-runtime-program>";
-    }
-
-    if (url.protocol === "file:") {
-      return url.pathname.split("/").at(-1) || "<file>";
-    }
-
-    return `${url.protocol}//${url.host}${url.pathname.split("/").at(-1) ?? ""}`;
-  } catch {
-    return source.length > maxStackLineLength / 2
-      ? "<generated-runtime-program>"
-      : source;
-  }
-}
-
-function truncateStackLine(line: string): string {
-  if (line.length <= maxStackLineLength) {
-    return line;
-  }
-
-  return `${line.slice(0, maxStackLineLength - 15)}... <truncated>`;
-}
-
-interface StackFrame {
-  readonly name?: string;
-  readonly location: string;
-}
-
-interface StackLocation {
-  readonly source: string;
-  readonly line?: string;
-  readonly column?: string;
-}
-
 function formatStandardSchemaPath(
   path: readonly (PropertyKey | { readonly key: PropertyKey })[] | undefined,
 ): string {
@@ -552,10 +378,6 @@ function truncateValidationReport(report: string): string {
   return `${report.slice(0, maxValidationReportLength - 36)}\n... validation report truncated.`;
 }
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 class ToolValidationError extends Error {
   readonly details: {
     readonly kind: "tool-validation";
@@ -576,48 +398,21 @@ class ToolValidationError extends Error {
   }
 }
 
-interface SchemaValidationIssue {
-  readonly path: string;
-  readonly message: string;
-}
-
-type SchemaValidationResult =
-  | { readonly value: unknown }
-  | { readonly issues: readonly SchemaValidationIssue[] };
-
 async function assertRuntimeClosed(
   finished: Promise<{ readonly kind: "closed" } | { readonly kind: "failed"; readonly error: Error }>,
-  emitTelemetry: (event: TelemetryEventInput) => void,
 ): Promise<void> {
   const result = await finished;
 
   if (result.kind === "closed") {
-    emitTelemetry({
-      kind: "runtime-finished",
-      status: "closed",
-    });
     return;
   }
 
-  emitTelemetry({
-    kind: "runtime-finished",
-    status: "failed",
-    error: errorFromUnknown(result.error),
-  });
   throw result.error;
-}
-
-function serializeProgramError(error: unknown): TelemetryError {
-  return errorFromUnknown(error);
 }
 
 function decodeProgramTelemetryEvent(
   event: ProgramTelemetryEvent,
-): TelemetryEventInput {
-  if (event.kind !== "program-log") {
-    return event;
-  }
-
+): TelemetryEvent {
   return {
     kind: "program-log",
     level: event.level,
@@ -627,9 +422,5 @@ function decodeProgramTelemetryEvent(
 }
 
 function decodeConsoleValue(value: SerializedConsoleValue): unknown {
-  if (value.format !== "flatted") {
-    throw new Error(`Unsupported code-mode console value format: ${String(value.format)}`);
-  }
-
   return parseFlatted(value.value);
 }

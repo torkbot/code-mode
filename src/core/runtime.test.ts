@@ -5,7 +5,6 @@ import test from "node:test";
 import {
   AgentSourceSyntaxError,
   createProgram,
-  startProgram,
 } from "./program.ts";
 import { maximumBsonFrameLength, readProgramMessages } from "./protocol/codec.ts";
 import type {
@@ -14,7 +13,6 @@ import type {
   Runtime,
   RuntimeFinished,
   RuntimeInstance,
-  RuntimeProgramModule,
 } from "./runtime.ts";
 import { maximumTelemetryErrorMessageLength } from "./telemetry.ts";
 
@@ -57,13 +55,11 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
   };
 
   const controller = new AbortController();
-  const instance = await startProgram({
-    runtime,
+  const instance = await runtime.start({
+    program: createProgram("async () => ({ value: 42 })"),
     signal: controller.signal,
-    agentSource: "async () => ({ value: 42 })",
   });
 
-  assert.equal(observedProgram?.kind, "javascript-module");
   assert.match(
     observedProgram?.source ?? "",
     /export async function startProgram\(channel\)/,
@@ -102,12 +98,9 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
   assert.deepEqual(await instance.finished, finished);
 });
 
-test("createProgram returns a discriminated self-contained module", () => {
-  const program = createProgram({
-    agentSource: "async () => ({ message: 'hello from code-mode' })",
-  });
+test("createProgram returns a self-contained module", () => {
+  const program = createProgram("async () => ({ message: 'hello from code-mode' })");
 
-  assert.equal(program.kind, "javascript-module");
   assert.match(program.source, /export async function startProgram\(channel\)/);
   assert.doesNotMatch(program.source, /globalThis\.__/);
   assert.doesNotMatch(program.source, /from "flatted"/);
@@ -126,17 +119,17 @@ test("createProgram returns a discriminated self-contained module", () => {
 
 test("createProgram checks syntax in the generated factory context", () => {
   assert.throws(
-    () => createProgram({ agentSource: 'await import("node:fs")' }),
+    () => createProgram('await import("node:fs")'),
     AgentSourceSyntaxError,
   );
 });
 
 test("generated programs reject oversized host frames before reading a payload", async () => {
-  const program = createProgram({
-    agentSource: "async ({ codemode }) => { await codemode.wait({}); }",
-  });
+  const program = createProgram("async ({ codemode }) => { await codemode.wait({}); }");
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
-  const runtimeProgram = await import(moduleUrl) as RuntimeProgramModule;
+  const runtimeProgram = await import(moduleUrl) as {
+    startProgram(channel: ByteChannel): Promise<void>;
+  };
   const writes: Uint8Array[] = [];
   let outgoingClosed = false;
 
@@ -157,22 +150,23 @@ test("generated programs reject oversized host frames before reading a payload",
     messages.push(message);
   }
   assert.deepEqual(messages.map((message) => message.kind), [
-    "telemetry",
     "tool-call",
     "program-error",
   ]);
-  const failure = messages[2];
+  const failure = messages[1];
   assert.equal(failure?.kind, "program-error");
   assert.match(failure.error.message, /exceeds the maximum/);
   assert.equal(outgoingClosed, true);
 });
 
 test("generated programs bound oversized errors into a program outcome", async () => {
-  const program = createProgram({
-    agentSource: `async () => { throw new Error("x".repeat(${maximumBsonFrameLength + 1})); }`,
-  });
+  const program = createProgram(
+    `async () => { throw new Error("x".repeat(${maximumBsonFrameLength + 1})); }`,
+  );
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
-  const runtimeProgram = await import(moduleUrl) as RuntimeProgramModule;
+  const runtimeProgram = await import(moduleUrl) as {
+    startProgram(channel: ByteChannel): Promise<void>;
+  };
   const writes: Uint8Array[] = [];
 
   await runtimeProgram.startProgram({
