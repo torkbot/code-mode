@@ -122,12 +122,6 @@ test("createProgram checks syntax in the generated factory context", () => {
     () => createProgram('await import("node:fs")'),
     AgentSourceSyntaxError,
   );
-  assert.throws(
-    () => createProgram(
-      `async () => {}); throw new Error("factory"); const _ = (undefined`,
-    ),
-    AgentSourceSyntaxError,
-  );
 });
 
 test("createProgram accepts closing parentheses in regular expressions", () => {

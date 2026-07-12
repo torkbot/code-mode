@@ -1,6 +1,9 @@
 import Schema from "typebox/schema";
+import Format from "typebox/format";
 
 import type { ToolSchema } from "../core/types.ts";
+
+Format.Set("date", Format.IsDate);
 
 export type TestJsonSchema =
   | {

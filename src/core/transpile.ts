@@ -9,19 +9,21 @@ const maxReportLength = 8_000;
 
 export function transpileAgentSource(source: string): TranspileResult {
   try {
-    const result = transformSync(source, {
-      filename: "agent.ts",
-      mode: "strip-only",
-      module: true,
-      sourceMap: false,
-    });
-    new Function(`return (\n${result.code}\n);`);
-    return {
-      kind: "javascript",
-      source: `function ${agentProgramFactoryName}(console, globalThis, global, Promise) {
-  const agentProgram = (${result.code}\n);
+    const result = transformSync(
+      `function ${agentProgramFactoryName}(console, globalThis, global, Promise) {
+  const agentProgram = (${source}\n);
   return agentProgram;
 }`,
+      {
+        filename: "agent.ts",
+        mode: "strip-only",
+        module: true,
+        sourceMap: false,
+      },
+    );
+    return {
+      kind: "javascript",
+      source: result.code,
     };
   } catch (error) {
     const report = formatTransformError(error);

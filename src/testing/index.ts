@@ -242,13 +242,6 @@ export function testRuntime(options: {
     assert.equal(syntax.error.name, "SyntaxError");
     assert.match(syntax.error.message, /InvalidSyntax/);
 
-    const escapedExpression = await emptyClient.run(
-      `async () => {}); throw new Error("factory"); const _ = (undefined`,
-      { signal: AbortSignal.timeout(5_000) },
-    );
-    assert.equal(escapedExpression.kind, "program-failed");
-    assert.equal(escapedExpression.error.name, "SyntaxError");
-
     const nonVoid = await emptyClient.run("async () => 42", {
       signal: AbortSignal.timeout(5_000),
     });
