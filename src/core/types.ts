@@ -528,11 +528,16 @@ const blockedToolNames = new Set([
 ]);
 
 function printJSDoc(indent: string, lines: readonly string[]): string[] {
-  if (lines.length === 0) return [];
-  if (lines.length === 1) return [`${indent}/** ${escapeJSDoc(lines[0]!)} */`];
+  const normalizedLines = lines.flatMap((line) => line.split(/\r?\n/));
+  if (normalizedLines.length === 0) return [];
+  if (normalizedLines.length === 1) {
+    return [`${indent}/** ${escapeJSDoc(normalizedLines[0]!)} */`];
+  }
   return [
     `${indent}/**`,
-    ...lines.map((line) => line === "" ? `${indent} *` : `${indent} * ${escapeJSDoc(line)}`),
+    ...normalizedLines.map((line) => (
+      line === "" ? `${indent} *` : `${indent} * ${escapeJSDoc(line)}`
+    )),
     `${indent} */`,
   ];
 }

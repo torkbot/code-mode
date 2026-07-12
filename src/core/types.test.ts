@@ -14,7 +14,7 @@ test("declarations include schema annotations", () => {
     defineTool(
       "getWeather",
       {
-        description: "Get weather for a location.",
+        description: "Get weather\nfor a location.",
         inputSchema: testSchema({
           type: "object",
           description: "The weather lookup request.",
@@ -60,7 +60,7 @@ test("declarations include schema annotations", () => {
       },
     ),
   ]);
-  assert.match(toolbox.typeDefinitions, /Get weather for a location/);
+  assert.match(toolbox.typeDefinitions, /\* Get weather\n +\* for a location/);
   assert.match(toolbox.typeDefinitions, /@param input The weather lookup request/);
   assert.match(toolbox.typeDefinitions, /readonly location: string/);
   assert.match(toolbox.typeDefinitions, /readonly includeForecast\?: boolean/);

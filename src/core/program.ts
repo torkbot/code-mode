@@ -443,7 +443,11 @@ export async function startProgram(channel) {
     }
 
     if (isError(value)) {
-      return value.stack ?? value.message;
+      return readErrorString(
+        value,
+        "stack",
+        readErrorString(value, "message", serialized.value),
+      );
     }
 
     return serialized.value;

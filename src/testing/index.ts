@@ -721,6 +721,7 @@ export function testRuntime(options: {
     assert.equal(programLog.values[4].message, "logged failure");
     assert.deepEqual(programLog.values[5], { $type: "bigint", value: "abc" });
     assert.deepEqual(programLog.values[6], { $type: "undefined" });
+    assert.equal(typeof programLog.values[7], "object");
     assert.equal(resultSettled, false);
 
     const toolStarted = await telemetry.next("tool-call-started");
@@ -1279,6 +1280,14 @@ const telemetryAgentProgram: AgentProgram<TelemetryApi> = async ({
     enumerable: true,
     value: payload,
   });
+  const hostileLoggedError = new Error("hidden");
+  for (const property of ["message", "stack"]) {
+    Object.defineProperty(hostileLoggedError, property, {
+      get() {
+        throw new Error("hostile logged error getter");
+      },
+    });
+  }
   console.log(
     "about to wait",
     payload,
@@ -1287,6 +1296,7 @@ const telemetryAgentProgram: AgentProgram<TelemetryApi> = async ({
     new Error("logged failure"),
     { $type: "bigint", value: "abc" },
     { $type: "undefined" },
+    hostileLoggedError,
   );
   await codemode.waitForRelease({ label: "gate" });
 };
