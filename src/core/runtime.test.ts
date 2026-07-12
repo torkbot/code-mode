@@ -72,7 +72,7 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
   assert.match(observedProgram?.source ?? "", /flattedStringify/);
   assert.match(
     observedProgram?.source ?? "",
-    /function __createCodeModeAgentProgram\(console, globalThis, global\)/,
+    /function __createCodeModeAgentProgram\(console, globalThis, global, Promise\)/,
   );
   assert.match(observedProgram?.source ?? "", /readBsonFrames\(channel\.incoming\)/);
   assert.match(observedProgram?.source ?? "", /channel\.outgoing\.write/);
@@ -108,7 +108,7 @@ test("createProgram returns a self-contained module", () => {
   assert.doesNotMatch(program.source, /const run = \(\(/);
   assert.match(program.source, /Bundled from flatted/);
   assert.match(program.source, /flattedStringify/);
-  assert.match(program.source, /function __createCodeModeAgentProgram\(console, globalThis, global\)/);
+  assert.match(program.source, /function __createCodeModeAgentProgram\(console, globalThis, global, Promise\)/);
   assert.match(program.source, /readBsonFrames\(channel\.incoming\)/);
   assert.match(program.source, /channel\.outgoing\.write/);
   assert.match(program.source, /kind: "program-log"/);
@@ -120,6 +120,12 @@ test("createProgram returns a self-contained module", () => {
 test("createProgram checks syntax in the generated factory context", () => {
   assert.throws(
     () => createProgram('await import("node:fs")'),
+    AgentSourceSyntaxError,
+  );
+  assert.throws(
+    () => createProgram(
+      `async () => {}); throw new Error("factory"); const _ = (undefined`,
+    ),
     AgentSourceSyntaxError,
   );
 });

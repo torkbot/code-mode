@@ -128,6 +128,13 @@ export function testRuntime(options: {
     assert.equal(unknown.kind, "invalid");
     assert.match(unknown.report, /notRegistered/);
 
+    const inherited = await client.validate(
+      "async ({ codemode }) => { await codemode.toString(); }",
+      AbortSignal.timeout(5_000),
+    );
+    assert.equal(inherited.kind, "invalid");
+    assert.match(inherited.report, /toString/);
+
     const extraInput = await client.validate(`async ({ codemode }) => {
       const request = { location: "London", extra: true };
       await codemode.getWeather(request);
@@ -234,6 +241,13 @@ export function testRuntime(options: {
     assert.equal(syntax.kind, "program-failed");
     assert.equal(syntax.error.name, "SyntaxError");
     assert.match(syntax.error.message, /InvalidSyntax/);
+
+    const escapedExpression = await emptyClient.run(
+      `async () => {}); throw new Error("factory"); const _ = (undefined`,
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    assert.equal(escapedExpression.kind, "program-failed");
+    assert.equal(escapedExpression.error.name, "SyntaxError");
 
     const nonVoid = await emptyClient.run("async () => 42", {
       signal: AbortSignal.timeout(5_000),
@@ -470,6 +484,16 @@ export function testRuntime(options: {
 
     assert.equal(twoHandlerDerivedPromise.kind, "program-failed");
     assert.equal(twoHandlerDerivedPromise.error.message, "handler failed");
+
+    const ignoredAggregate = await client.run(`async ({ codemode }) => {
+      void Promise.all([codemode.fail({})]);
+      await codemode.waitForFailure({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    assert.equal(ignoredAggregate.kind, "program-failed");
+    assert.equal(ignoredAggregate.error.message, "unobserved tool failure");
   });
 
   test(`${options.name}: client runs an agent program against toolbox tools`, async () => {

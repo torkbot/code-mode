@@ -108,6 +108,7 @@ export async function startProgram(channel) {
   const responses = readBsonFrames(channel.incoming)[Symbol.asyncIterator]();
   const pendingToolCalls = new Map();
   const unobservedToolCalls = new Map();
+  const trackedToolPromises = new WeakSet();
   let responsePump;
   let writeQueue = Promise.resolve();
   const scope = {
@@ -147,6 +148,7 @@ export async function startProgram(channel) {
 
   try {
     const programConsole = createProgramConsole(emitProgramLog);
+    const programPromise = createProgramPromise();
     let programGlobalThis;
     programGlobalThis = new Proxy(globalThis, {
       get(target, property, receiver) {
@@ -154,6 +156,7 @@ export async function startProgram(channel) {
         if (property === "globalThis" || property === "global") {
           return programGlobalThis;
         }
+        if (property === "Promise") return programPromise;
         return Reflect.get(target, property, receiver);
       },
     });
@@ -161,6 +164,7 @@ export async function startProgram(channel) {
       programConsole,
       programGlobalThis,
       programGlobalThis,
+      programPromise,
     );
     const result = await run(scope);
     if (result !== undefined) {
@@ -219,7 +223,7 @@ export async function startProgram(channel) {
       },
     );
 
-    return new Proxy(call, {
+    const tracked = new Proxy(call, {
       get(target, property) {
         if (property === "then" || property === "catch" || property === "finally") {
           return (...args) => {
@@ -231,6 +235,26 @@ export async function startProgram(channel) {
         }
 
         return Reflect.get(target, property, target);
+      },
+    });
+    trackedToolPromises.add(tracked);
+    return tracked;
+  }
+
+  function createProgramPromise() {
+    const combinators = new Set(["all", "allSettled", "any", "race"]);
+    return new Proxy(Promise, {
+      get(target, property, receiver) {
+        if (!combinators.has(property)) {
+          return Reflect.get(target, property, receiver);
+        }
+        return (iterable) => {
+          const values = Array.from(iterable);
+          const aggregate = Reflect.apply(target[property], target, [values]);
+          return values.some((value) => trackedToolPromises.has(value))
+            ? trackToolCall(aggregate, true)
+            : aggregate;
+        };
       },
     });
   }

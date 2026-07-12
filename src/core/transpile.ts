@@ -1,4 +1,5 @@
 import { transformSync } from "amaro";
+import { createScanner, LanguageVariant, SyntaxKind } from "typescript/unstable/ast";
 
 export type TranspileResult =
   | { readonly kind: "javascript"; readonly source: string }
@@ -9,8 +10,9 @@ const maxReportLength = 8_000;
 
 export function transpileAgentSource(source: string): TranspileResult {
   try {
+    assertSingleExpression(source);
     const result = transformSync(
-      `function ${agentProgramFactoryName}(console, globalThis, global) {
+      `function ${agentProgramFactoryName}(console, globalThis, global, Promise) {
   const agentProgram = (${source}\n);
   return agentProgram;
 }`,
@@ -33,6 +35,21 @@ export function transpileAgentSource(source: string): TranspileResult {
         ? report
         : `${report.slice(0, maxReportLength - 33)}\n... transpile report truncated.`,
     };
+  }
+}
+
+function assertSingleExpression(source: string): void {
+  const scanner = createScanner(true, LanguageVariant.Standard, source);
+  let parenthesisDepth = 0;
+  for (let token = scanner.scan(); token !== SyntaxKind.EndOfFile; token = scanner.scan()) {
+    if (token === SyntaxKind.OpenParenToken) {
+      parenthesisDepth++;
+    } else if (token === SyntaxKind.CloseParenToken) {
+      if (parenthesisDepth === 0) {
+        throw new SyntaxError("Code-mode source must be a single expression");
+      }
+      parenthesisDepth--;
+    }
   }
 }
 

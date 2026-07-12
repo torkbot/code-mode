@@ -235,6 +235,13 @@ export function generateTypes(req: TypeGenerationRequest): string {
     `  : Expected;`,
     ``,
     `interface Tools {`,
+    `  readonly constructor?: never;`,
+    `  readonly hasOwnProperty?: never;`,
+    `  readonly isPrototypeOf?: never;`,
+    `  readonly propertyIsEnumerable?: never;`,
+    `  readonly toLocaleString?: never;`,
+    `  readonly toString?: never;`,
+    `  readonly valueOf?: never;`,
     joinBlocks(methods),
     `}`,
     ``,
@@ -501,6 +508,14 @@ function printPropertyName(name: string): string {
   return /^[$A-Z_a-z][$\w]*$/.test(name) ? name : JSON.stringify(name);
 }
 
+const reservedWords = new Set([
+  "break", "case", "catch", "class", "const", "continue", "debugger",
+  "default", "delete", "do", "else", "export", "extends", "false",
+  "finally", "for", "function", "if", "import", "in", "instanceof",
+  "new", "null", "return", "super", "switch", "this", "throw", "true",
+  "try", "typeof", "var", "void", "while", "with", "yield",
+]);
+
 function printJSDoc(indent: string, lines: readonly string[]): string[] {
   if (lines.length === 0) return [];
   if (lines.length === 1) return [`${indent}/** ${escapeJSDoc(lines[0]!)} */`];
@@ -516,7 +531,11 @@ function joinBlocks(blocks: readonly string[]): string {
 }
 
 function assertIdentifier(value: unknown, label: string): asserts value is string {
-  if (typeof value !== "string" || !/^[$A-Z_a-z][$\w]*$/.test(value)) {
+  if (
+    typeof value !== "string"
+    || !/^[$A-Z_a-z][$\w]*$/.test(value)
+    || reservedWords.has(value)
+  ) {
     throw new Error(`Code-mode ${label} must be a valid JavaScript identifier: ${String(value)}`);
   }
 }
