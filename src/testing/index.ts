@@ -702,6 +702,9 @@ export function testRuntime(options: {
         if (event.kind === "execution-completed") {
           Reflect.set(event.outcome, "telemetryAnnotation", true);
         }
+        if (event.kind === "tool-call-completed") {
+          Reflect.set(event.output as object, "telemetryAnnotation", true);
+        }
       },
     });
     let resultSettled = false;
@@ -736,7 +739,10 @@ export function testRuntime(options: {
 
     const toolCompleted = await telemetry.next("tool-call-completed");
     assert.equal(toolCompleted.toolCallId, toolStarted.toolCallId);
-    assert.deepEqual(toolCompleted.output, { released: true });
+    assert.deepEqual(toolCompleted.output, {
+      released: true,
+      telemetryAnnotation: true,
+    });
 
     assert.deepEqual(await result, { kind: "success" });
 

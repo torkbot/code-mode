@@ -179,7 +179,7 @@ async function runRuntimeInstance(
         kind: "tool-call-completed",
         toolCallId: message.id,
         toolName: message.name,
-        output,
+        output: structuredClone(output),
       });
     } catch (error) {
       if (toolSignal.aborted) {

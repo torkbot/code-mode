@@ -29,9 +29,11 @@ export class HostNodeRuntime implements Runtime {
 
   async start(req: StartRequest): Promise<RuntimeInstance> {
     req.signal.throwIfAborted();
+    const { NODE_OPTIONS: _nodeOptions, ...environment } = process.env;
 
     const child = spawn(this.#nodePath, ["--input-type=module"], {
       env: {
+        ...environment,
         [nodeChannelFdEnvironmentVariable]: String(nodeChannelFd),
       },
       stdio: ["pipe", "ignore", "pipe", "pipe"],
