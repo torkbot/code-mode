@@ -106,8 +106,8 @@ export function createToolbox(tools: readonly ExecutableToolDefinition[]): Toolb
     const toolValue: unknown = tool;
     assertRecord(toolValue, "tool");
     assertIdentifier(tool.name, "tool name");
-    if (tool.name === "then") {
-      throw new Error("Code-mode tool name cannot be then");
+    if (blockedToolNames.has(tool.name)) {
+      throw new Error(`Code-mode tool name is reserved: ${tool.name}`);
     }
     assertNonEmptyString(tool.description, `tool ${tool.name} description`);
     assertToolSchema(tool.inputSchema, `tool ${tool.name} inputSchema`);
@@ -514,6 +514,17 @@ const reservedWords = new Set([
   "finally", "for", "function", "if", "import", "in", "instanceof",
   "new", "null", "return", "super", "switch", "this", "throw", "true",
   "try", "typeof", "var", "void", "while", "with", "yield",
+]);
+
+const blockedToolNames = new Set([
+  "constructor",
+  "hasOwnProperty",
+  "isPrototypeOf",
+  "propertyIsEnumerable",
+  "then",
+  "toLocaleString",
+  "toString",
+  "valueOf",
 ]);
 
 function printJSDoc(indent: string, lines: readonly string[]): string[] {

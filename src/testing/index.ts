@@ -494,6 +494,15 @@ export function testRuntime(options: {
 
     assert.equal(ignoredAggregate.kind, "program-failed");
     assert.equal(ignoredAggregate.error.message, "unobserved tool failure");
+
+    const racedToolCall = await client.run(`async ({ codemode }) => {
+      await Promise.race([Promise.resolve(), codemode.fail({})]);
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    assert.equal(racedToolCall.kind, "program-failed");
+    assert.match(racedToolCall.error.message, /Promise\.race cannot consume/);
   });
 
   test(`${options.name}: client runs an agent program against toolbox tools`, async () => {

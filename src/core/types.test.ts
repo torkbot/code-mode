@@ -173,7 +173,21 @@ test("toolbox rejects invalid names, duplicate names, and empty descriptions", (
         async () => ({}),
       ),
     ]),
-    /tool name cannot be then/,
+    /tool name is reserved: then/,
+  );
+  assert.throws(
+    () => createToolbox([
+      defineTool(
+        "toString",
+        {
+          description: "Collide with Object.prototype.",
+          inputSchema: schema,
+          outputSchema: schema,
+        },
+        async () => ({}),
+      ),
+    ]),
+    /tool name is reserved: toString/,
   );
   assert.throws(() => createToolbox([valid, valid]), /tool names must be unique/);
   assert.throws(

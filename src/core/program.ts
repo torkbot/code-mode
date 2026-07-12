@@ -250,8 +250,14 @@ export async function startProgram(channel) {
         }
         return (iterable) => {
           const values = Array.from(iterable);
+          const includesToolCall = values.some((value) => (
+            trackedToolPromises.has(value)
+          ));
+          if (includesToolCall && (property === "any" || property === "race")) {
+            throw new Error("Promise." + property + " cannot consume code-mode tool calls");
+          }
           const aggregate = Reflect.apply(target[property], target, [values]);
-          return values.some((value) => trackedToolPromises.has(value))
+          return includesToolCall
             ? trackToolCall(aggregate, true)
             : aggregate;
         };
