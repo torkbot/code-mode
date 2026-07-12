@@ -76,7 +76,7 @@ export function createTelemetryEmitter(
 export function errorFromUnknown(
   error: unknown,
 ): TelemetryError {
-  if (error instanceof Error) {
+  if (isError(error)) {
     const stack = readErrorString(error, "stack", null);
     return {
       name: truncateTelemetryErrorField(
@@ -110,6 +110,14 @@ export function errorFromUnknown(
     stack: null,
     details: null,
   };
+}
+
+function isError(value: unknown): value is Error {
+  try {
+    return value instanceof Error;
+  } catch {
+    return false;
+  }
 }
 
 function readErrorDetails(error: Error): ErrorDetails | null {

@@ -113,6 +113,9 @@ export class SandboxNodeRuntime implements Runtime {
       if (forceTerminationTimeout !== undefined) {
         clearTimeout(forceTerminationTimeout);
       }
+      if (req.signal.aborted) {
+        throw req.signal.reason;
+      }
       throw error;
     }
 

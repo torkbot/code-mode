@@ -358,7 +358,7 @@ export async function startProgram(channel) {
   }
 
   function encodeConsoleValue(marker, value) {
-    if (value instanceof Error) {
+    if (isError(value)) {
       return {
         $type: "error",
         marker,
@@ -407,7 +407,7 @@ export async function startProgram(channel) {
       return value;
     }
 
-    if (value instanceof Error) {
+    if (isError(value)) {
       return value.stack ?? value.message;
     }
 
@@ -415,7 +415,7 @@ export async function startProgram(channel) {
   }
 
   function serializeError(error) {
-    if (error instanceof Error) {
+    if (isError(error)) {
       const stack = readErrorString(error, "stack", null);
       return {
         name: truncateErrorField(
@@ -446,6 +446,14 @@ export async function startProgram(channel) {
       stack: null,
       details: null,
     };
+  }
+
+  function isError(value) {
+    try {
+      return value instanceof Error;
+    } catch {
+      return false;
+    }
   }
 
   function errorFromSerializedError(error) {

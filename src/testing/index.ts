@@ -313,6 +313,14 @@ export function testRuntime(options: {
       "Code-mode thrown value could not be serialized",
     );
 
+    const hostileProxy = await emptyClient.run(`async () => {
+      throw new Proxy({}, { getPrototypeOf() { throw new Error("hostile prototype"); } });
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    assert.equal(hostileProxy.kind, "program-failed");
+    assert.equal(hostileProxy.error.name, "Error");
+
     const hostileToolError = await failingClient.run(
       "async ({ codemode }) => { await codemode.failHostile({}); }",
       { signal: AbortSignal.timeout(5_000) },
@@ -322,6 +330,13 @@ export function testRuntime(options: {
       hostileToolError.error.message,
       "Code-mode error message could not be read",
     );
+
+    const hostileToolProxy = await failingClient.run(
+      "async ({ codemode }) => { await codemode.failProxy({}); }",
+      { signal: AbortSignal.timeout(5_000) },
+    );
+    assert.equal(hostileToolProxy.kind, "program-failed");
+    assert.equal(hostileToolProxy.error.name, "Error");
   });
 
   test(`${options.name}: telemetry is ordered and callback failures cannot alter execution`, async () => {
@@ -1052,6 +1067,21 @@ function createFailingToolbox() {
           });
         }
         throw error;
+      },
+    ),
+    defineTool(
+      "failProxy",
+      {
+        description: "Fail with an unreadable prototype.",
+        inputSchema: EmptyObject,
+        outputSchema: EmptyObject,
+      },
+      async () => {
+        throw new Proxy({}, {
+          getPrototypeOf() {
+            throw new Error("hostile prototype");
+          },
+        });
       },
     ),
   ]);

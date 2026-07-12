@@ -66,6 +66,51 @@ test("sandbox-node observes a signal aborted during spawn", async () => {
   assert.deepEqual(await instance.finished, { kind: "closed" });
 });
 
+test("sandbox-node preserves cancellation during bootstrap writes", async () => {
+  const controller = new AbortController();
+  const reason = new Error("bootstrap cancelled");
+  const emptyReadable = new ReadableStream<Uint8Array>({
+    start(streamController) {
+      streamController.close();
+    },
+  });
+  const sandbox: SandboxNodeHost = {
+    spawn() {
+      return {
+        stdin: new WritableStream({
+          write() {
+            controller.abort(reason);
+            throw new Error("EPIPE");
+          },
+        }),
+        stdout: emptyReadable,
+        stderr: new ReadableStream({
+          start(streamController) {
+            streamController.close();
+          },
+        }),
+        pipes: new Map([[3, {
+          input: new WritableStream(),
+          output: new ReadableStream(),
+        }]]),
+        ready: Promise.resolve(),
+        exit: Promise.resolve({ exitCode: null, signal: "SIGTERM" }),
+        kill() {},
+      };
+    },
+  };
+  const runtime = new SandboxNodeRuntime({
+    sandbox,
+    nodePath: process.execPath,
+    cwd: process.cwd(),
+  });
+
+  await assert.rejects(runtime.start({
+    program: { source: "export async function startProgram() {}" },
+    signal: controller.signal,
+  }), (error) => error === reason);
+});
+
 test("sandbox-node bounds stderr retained for process failures", async () => {
   const runtime = new SandboxNodeRuntime({
     sandbox: new HostBackedSandbox(),

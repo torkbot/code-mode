@@ -7,6 +7,8 @@ export type {
 export type {
   Toolbox,
   ToolSchema,
+  SchemaInput,
+  SchemaOutput,
 } from "./core/types.ts";
 export type {
   RunOutcome,
