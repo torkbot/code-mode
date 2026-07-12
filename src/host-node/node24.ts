@@ -51,6 +51,9 @@ async function readTypeDefinitionPackage(
 
   for (const diskPath of await listTypeDefinitionFiles(req.diskRoot)) {
     const relativePath = relative(req.diskRoot, diskPath).split(sep).join("/");
+    if (/^ts\d+(?:\.|\/)/.test(relativePath)) {
+      continue;
+    }
     files.push({
       path: `${req.virtualRoot}/${relativePath}`,
       contents: await readFile(diskPath, "utf8"),

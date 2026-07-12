@@ -132,6 +132,8 @@ test("createProgram checks syntax in the generated factory context", () => {
 
 test("createProgram accepts closing parentheses in regular expressions", () => {
   assert.doesNotThrow(() => createProgram("async () => /\\)/.test(')')"));
+  assert.doesNotThrow(() => createProgram("async () => !/\\)/.test(')')"));
+  assert.doesNotThrow(() => createProgram("async () => true ? /\\)/ : /x/"));
 });
 
 test("generated programs reject oversized host frames before reading a payload", async () => {

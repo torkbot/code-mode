@@ -21,6 +21,10 @@ test("host-node exports reusable Node 24 type definitions", async () => {
 
   assertTypeDefinitionExists(typeDefinitions, "node_modules/@types/node/index.d.ts");
   assertTypeDefinitionExists(typeDefinitions, "node_modules/undici-types/index.d.ts");
+  assert.equal(
+    typeDefinitions.some((file) => /node_modules\/@types\/node\/ts\d/.test(file.path)),
+    false,
+  );
 });
 
 test("host-node runtime type definitions validate Node globals and node: imports", async () => {

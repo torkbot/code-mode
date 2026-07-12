@@ -32,7 +32,6 @@ export class HostNodeRuntime implements Runtime {
 
     const child = spawn(this.#nodePath, ["--input-type=module"], {
       env: {
-        ...process.env,
         [nodeChannelFdEnvironmentVariable]: String(nodeChannelFd),
       },
       stdio: ["pipe", "ignore", "pipe", "pipe"],

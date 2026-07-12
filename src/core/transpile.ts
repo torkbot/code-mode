@@ -43,7 +43,7 @@ function assertSingleExpression(source: string): void {
   let parenthesisDepth = 0;
   let previousToken: SyntaxKind | undefined;
   for (let token = scanner.scan(); token !== SyntaxKind.EndOfFile; token = scanner.scan()) {
-    if (token === SyntaxKind.SlashToken && canStartRegularExpression(previousToken)) {
+    if (token === SyntaxKind.SlashToken && !canEndExpression(previousToken)) {
       token = scanner.reScanSlashToken();
     }
     if (token === SyntaxKind.OpenParenToken) {
@@ -58,16 +58,25 @@ function assertSingleExpression(source: string): void {
   }
 }
 
-function canStartRegularExpression(previousToken: SyntaxKind | undefined): boolean {
-  return previousToken === undefined
-    || previousToken === SyntaxKind.OpenParenToken
-    || previousToken === SyntaxKind.OpenBracketToken
-    || previousToken === SyntaxKind.OpenBraceToken
-    || previousToken === SyntaxKind.CommaToken
-    || previousToken === SyntaxKind.ColonToken
-    || previousToken === SyntaxKind.EqualsToken
-    || previousToken === SyntaxKind.EqualsGreaterThanToken
-    || previousToken === SyntaxKind.ReturnKeyword;
+function canEndExpression(token: SyntaxKind | undefined): boolean {
+  return token === SyntaxKind.Identifier
+    || token === SyntaxKind.PrivateIdentifier
+    || token === SyntaxKind.NumericLiteral
+    || token === SyntaxKind.BigIntLiteral
+    || token === SyntaxKind.StringLiteral
+    || token === SyntaxKind.NoSubstitutionTemplateLiteral
+    || token === SyntaxKind.TemplateTail
+    || token === SyntaxKind.RegularExpressionLiteral
+    || token === SyntaxKind.CloseParenToken
+    || token === SyntaxKind.CloseBracketToken
+    || token === SyntaxKind.CloseBraceToken
+    || token === SyntaxKind.PlusPlusToken
+    || token === SyntaxKind.MinusMinusToken
+    || token === SyntaxKind.FalseKeyword
+    || token === SyntaxKind.NullKeyword
+    || token === SyntaxKind.SuperKeyword
+    || token === SyntaxKind.ThisKeyword
+    || token === SyntaxKind.TrueKeyword;
 }
 
 function formatTransformError(error: unknown): string {
