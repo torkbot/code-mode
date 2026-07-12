@@ -245,6 +245,11 @@ export async function startProgram(channel) {
     const combinators = new Set(["all", "allSettled", "any", "race"]);
     return new Proxy(Promise, {
       get(target, property, receiver) {
+        if (property === "resolve") {
+          return (value) => trackedToolPromises.has(value)
+            ? value
+            : target.resolve(value);
+        }
         if (!combinators.has(property)) {
           return Reflect.get(target, property, receiver);
         }

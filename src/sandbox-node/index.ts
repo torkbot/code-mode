@@ -83,8 +83,10 @@ export class SandboxNodeRuntime implements Runtime {
     }
 
     let terminationRequested = false;
+    let finishedSettled = false;
     let forceTerminationTimeout: ReturnType<typeof setTimeout> | undefined;
     const requestTermination = (): void => {
+      if (finishedSettled) return;
       terminationRequested = true;
       process.kill("SIGTERM");
       forceTerminationTimeout ??= setTimeout(() => {
@@ -155,6 +157,7 @@ export class SandboxNodeRuntime implements Runtime {
           error: errorFromUnknown(error),
         };
       } finally {
+        finishedSettled = true;
         req.signal.removeEventListener("abort", abort);
         if (forceTerminationTimeout !== undefined) {
           clearTimeout(forceTerminationTimeout);

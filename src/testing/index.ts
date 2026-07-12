@@ -495,6 +495,16 @@ export function testRuntime(options: {
     assert.equal(ignoredAggregate.kind, "program-failed");
     assert.equal(ignoredAggregate.error.message, "unobserved tool failure");
 
+    const resolvedToolCall = await client.run(`async ({ codemode }) => {
+      void Promise.resolve(codemode.fail({}));
+      await codemode.waitForFailure({});
+    }`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+
+    assert.equal(resolvedToolCall.kind, "program-failed");
+    assert.equal(resolvedToolCall.error.message, "unobserved tool failure");
+
     const racedToolCall = await client.run(`async ({ codemode }) => {
       await Promise.race([Promise.resolve(), codemode.fail({})]);
     }`, {

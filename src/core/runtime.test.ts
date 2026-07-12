@@ -130,6 +130,10 @@ test("createProgram checks syntax in the generated factory context", () => {
   );
 });
 
+test("createProgram accepts closing parentheses in regular expressions", () => {
+  assert.doesNotThrow(() => createProgram("async () => /\\)/.test(')')"));
+});
+
 test("generated programs reject oversized host frames before reading a payload", async () => {
   const program = createProgram("async ({ codemode }) => { await codemode.wait({}); }");
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;

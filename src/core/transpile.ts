@@ -41,7 +41,11 @@ export function transpileAgentSource(source: string): TranspileResult {
 function assertSingleExpression(source: string): void {
   const scanner = createScanner(true, LanguageVariant.Standard, source);
   let parenthesisDepth = 0;
+  let previousToken: SyntaxKind | undefined;
   for (let token = scanner.scan(); token !== SyntaxKind.EndOfFile; token = scanner.scan()) {
+    if (token === SyntaxKind.SlashToken && canStartRegularExpression(previousToken)) {
+      token = scanner.reScanSlashToken();
+    }
     if (token === SyntaxKind.OpenParenToken) {
       parenthesisDepth++;
     } else if (token === SyntaxKind.CloseParenToken) {
@@ -50,7 +54,20 @@ function assertSingleExpression(source: string): void {
       }
       parenthesisDepth--;
     }
+    previousToken = token;
   }
+}
+
+function canStartRegularExpression(previousToken: SyntaxKind | undefined): boolean {
+  return previousToken === undefined
+    || previousToken === SyntaxKind.OpenParenToken
+    || previousToken === SyntaxKind.OpenBracketToken
+    || previousToken === SyntaxKind.OpenBraceToken
+    || previousToken === SyntaxKind.CommaToken
+    || previousToken === SyntaxKind.ColonToken
+    || previousToken === SyntaxKind.EqualsToken
+    || previousToken === SyntaxKind.EqualsGreaterThanToken
+    || previousToken === SyntaxKind.ReturnKeyword;
 }
 
 function formatTransformError(error: unknown): string {
