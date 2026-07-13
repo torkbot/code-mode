@@ -21,6 +21,17 @@ testRuntime({
   },
 });
 
+test("sandbox-node supplies its Node 24 checking environment", async () => {
+  const runtime = createSandboxNodeRuntime();
+  const typeDefinitions = await runtime.loadTypeDefinitionFiles();
+
+  assert.equal(runtime.description, "Node.js 24");
+  assert.equal(
+    typeDefinitions.some((file) => file.path === "node_modules/@types/node/index.d.ts"),
+    true,
+  );
+});
+
 test("sandbox-node observes a signal aborted during spawn", async () => {
   const controller = new AbortController();
   let killed = false;
@@ -142,10 +153,6 @@ test("sandbox-node resolves package imports from the runtime working directory",
   const client = createClient({
     runtime: createSandboxNodeRuntime(),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(
@@ -161,10 +168,6 @@ test("sandbox-node escalates termination when a program ignores SIGTERM", async 
   const client = createClient({
     runtime: createSandboxNodeRuntime(),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(

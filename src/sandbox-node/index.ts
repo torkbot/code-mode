@@ -5,12 +5,14 @@ import type {
   RuntimeFinished,
   RuntimeInstance,
   StartRequest,
+  TypeDefinitionFile,
 } from "../core/runtime.ts";
 import {
   createNodeBootstrapSource,
   nodeChannelFd,
   nodeChannelFdEnvironmentVariable,
 } from "../node-runtime/bootstrap.ts";
+import { loadNode24TypeDefinitionFiles } from "../node-runtime/node24.ts";
 
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
@@ -56,6 +58,7 @@ export interface SandboxNodeProcessExit {
 }
 
 export class SandboxNodeRuntime implements Runtime {
+  readonly description = "Node.js 24";
   readonly #sandbox: SandboxNodeHost;
   readonly #nodePath: string;
   readonly #cwd: string;
@@ -64,6 +67,10 @@ export class SandboxNodeRuntime implements Runtime {
     this.#sandbox = options.sandbox;
     this.#nodePath = options.nodePath;
     this.#cwd = options.cwd;
+  }
+
+  loadTypeDefinitionFiles(): Promise<readonly TypeDefinitionFile[]> {
+    return loadNode24TypeDefinitionFiles();
   }
 
   async start(req: StartRequest): Promise<RuntimeInstance> {

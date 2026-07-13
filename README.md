@@ -3,10 +3,10 @@
 Run agent-authored TypeScript against host-controlled tools on a pluggable
 JavaScript runtime.
 
-The library owns generated declarations, checking, TypeScript
-erasure, host-side validation, routing, and telemetry. A runtime adapter only
-evaluates a self-contained JavaScript module and provides a bidirectional byte
-channel.
+The library owns generated declarations, checking, TypeScript erasure,
+host-side validation, routing, and telemetry. A runtime adapter describes its
+execution environment, supplies its checker declarations, evaluates a
+self-contained JavaScript module, and provides a bidirectional byte channel.
 
 ## Install
 
@@ -25,10 +25,7 @@ import {
   createToolbox,
   defineTool,
 } from "@torkbot/code-mode";
-import {
-  HostNodeRuntime,
-  readNode24TypeDefinitions,
-} from "@torkbot/code-mode/host-node";
+import { HostNodeRuntime } from "@torkbot/code-mode/host-node";
 
 const toolbox = createToolbox([
   defineTool(
@@ -45,19 +42,15 @@ const toolbox = createToolbox([
   ),
 ]);
 
-const environment = {
-  description: `Node.js ${process.version}`,
-  typeDefinitionFiles: await readNode24TypeDefinitions(),
-};
+const runtime = new HostNodeRuntime(process.execPath);
 
 const client = createClient({
   toolbox,
-  runtime: new HostNodeRuntime(process.execPath),
-  environment,
+  runtime,
 });
 
 const declarations = toolbox.typeDefinitions;
-const runtimeDescription = environment.description;
+const runtimeDescription = runtime.description;
 
 const source = `async ({ codemode }: AgentProgramScope) => {
   const weather = await codemode.getWeather({ location: "London" });
@@ -135,22 +128,20 @@ interface Client {
 }
 ```
 
-The intended model-facing sequence is:
-
-1. Read `toolbox.typeDefinitions` and `environment.description`.
-2. Author one async function expression returning `Promise<void>`.
-3. Call `validate()` and repair any diagnostics.
-4. Call `run()`.
-
 `toolbox.typeDefinitions` contains the program contract and the complete
-toolbox. It is deterministic and has no runtime side effects. The environment
-description is separate concise context for the agent.
+toolbox. It is deterministic and has no runtime side effects.
+
+`runtime.description` is opaque context describing the execution environment.
+An embedder may present it to an agent, transform it, combine it with other
+instructions, or omit it. Code mode does not interpret the description or
+prescribe how an agent harness presents it.
 
 `validate()` uses the released native TypeScript compiler with an in-memory
-project. It mounts the toolbox declarations as `codemode.d.ts` and the
-environment's `typeDefinitionFiles` at their supplied virtual paths. Runtime
-type files are checker-only; they are not included in agent declarations or sent
-to the execution runtime.
+project. It mounts the toolbox declarations as `codemode.d.ts` and the files
+returned by `runtime.loadTypeDefinitionFiles()` at their supplied virtual paths.
+Runtime type files are checker-only; they are not included in agent declarations
+or sent to the execution runtime. Because the runtime supplies both these files
+and the execution channel, checking and execution describe the same target.
 Validation enforces the same erasable-only TypeScript subset that execution can
 strip. Diagnostics use submitted-source positions; diagnostics and reports are
 serializable and bounded.
@@ -204,12 +195,19 @@ Runtime authors import `Runtime` from `@torkbot/code-mode`:
 
 ```ts
 interface Runtime {
+  readonly description: string;
+  loadTypeDefinitionFiles(): Promise<readonly TypeDefinitionFile[]>;
   start(request: {
     readonly program: {
       readonly source: string;
     };
     readonly signal: AbortSignal;
   }): Promise<RuntimeInstance>;
+}
+
+interface TypeDefinitionFile {
+  readonly path: string;
+  readonly contents: string;
 }
 
 interface RuntimeInstance {
@@ -236,10 +234,12 @@ The program is self-contained ESM and exports:
 export function startProgram(channel: ByteChannel): Promise<void>;
 ```
 
-The adapter evaluates the module, invokes `startProgram(channel)`, and reports
-lifecycle completion. It does not receive tool definitions, decode protocol
-messages, inject globals, or write generated files unless its own substrate
-requires that as an implementation detail.
+The description is opaque to code mode. The type definition files describe the
+ambient APIs available to checked programs. The adapter evaluates the module,
+invokes `startProgram(channel)`, and reports lifecycle completion. It does not
+receive tool definitions, decode protocol messages, inject globals, or write
+generated files unless its own substrate requires that as an implementation
+detail.
 
 ## Node Adapters
 
@@ -252,7 +252,8 @@ const runtime = new HostNodeRuntime(process.execPath);
 The required path is used to spawn a child Node.js process. The generated module
 is loaded in memory against a virtual file URL rooted at the child working
 directory, so bare dynamic imports use normal Node.js package resolution. The
-byte channel uses fd 3.
+byte channel uses fd 3. The runtime supplies the bundled Node.js 24 declarations
+to the checker.
 
 ### Sandbox Node.js
 
@@ -270,6 +271,7 @@ The sandbox host must support streaming spawn with caller-selected full-duplex
 descriptors. The adapter requests fd 3, streams a self-contained bootstrap over
 stdin, and uses fd 3 exclusively for code-mode traffic. The generated module is
 anchored at `cwd` for package resolution without writing a runtime file.
+The runtime supplies the bundled Node.js 24 declarations to the checker.
 
 ## Runtime Conformance
 

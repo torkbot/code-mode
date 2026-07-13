@@ -8,23 +8,28 @@ import type {
   RuntimeFinished,
   RuntimeInstance,
   StartRequest,
+  TypeDefinitionFile,
 } from "../core/runtime.ts";
 import {
   createNodeBootstrapSource,
   nodeChannelFd,
   nodeChannelFdEnvironmentVariable,
 } from "../node-runtime/bootstrap.ts";
-
-export { readNode24TypeDefinitions } from "./node24.ts";
+import { loadNode24TypeDefinitionFiles } from "../node-runtime/node24.ts";
 
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
 
 export class HostNodeRuntime implements Runtime {
+  readonly description = "Node.js 24";
   readonly #nodePath: string;
 
   constructor(nodePath: string) {
     this.#nodePath = nodePath;
+  }
+
+  loadTypeDefinitionFiles(): Promise<readonly TypeDefinitionFile[]> {
+    return loadNode24TypeDefinitionFiles();
   }
 
   async start(req: StartRequest): Promise<RuntimeInstance> {

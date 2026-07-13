@@ -5,7 +5,6 @@ import test from "node:test";
 import { testRuntime } from "../testing/index.ts";
 import { createClient, createToolbox } from "../index.ts";
 import { HostNodeRuntime } from "./index.ts";
-import { readNode24TypeDefinitions } from "./node24.ts";
 
 async function createHostNodeRuntime(): Promise<HostNodeRuntime> {
   return new HostNodeRuntime(process.execPath);
@@ -16,9 +15,11 @@ testRuntime({
   createRuntime: createHostNodeRuntime,
 });
 
-test("host-node exports reusable Node 24 type definitions", async () => {
-  const typeDefinitions = await readNode24TypeDefinitions();
+test("host-node supplies its Node 24 checking environment", async () => {
+  const runtime = new HostNodeRuntime(process.execPath);
+  const typeDefinitions = await runtime.loadTypeDefinitionFiles();
 
+  assert.equal(runtime.description, "Node.js 24");
   assertTypeDefinitionExists(typeDefinitions, "node_modules/@types/node/index.d.ts");
   assertTypeDefinitionExists(typeDefinitions, "node_modules/undici-types/index.d.ts");
   assert.equal(
@@ -31,10 +32,6 @@ test("host-node runtime type definitions validate Node globals and node: imports
   const client = createClient({
     runtime: new HostNodeRuntime(process.execPath),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: await readNode24TypeDefinitions(),
-    },
   });
 
   const validation = await client.validate(`async () => {
@@ -64,10 +61,6 @@ test("host-node resolves package imports from the runtime working directory", as
   const client = createClient({
     runtime: await createHostNodeRuntime(),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(
@@ -83,10 +76,6 @@ test("host-node escalates termination when a program ignores SIGTERM", async () 
   const client = createClient({
     runtime: await createHostNodeRuntime(),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(

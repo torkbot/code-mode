@@ -33,7 +33,9 @@ export function testRuntime(options: {
         },
       ),
     ]);
-    const client = createClient({ runtime, toolbox, environment: testEnvironment });
+    const client = createClient({ runtime, toolbox });
+
+    assert.ok(runtime.description.length > 0);
 
     assert.match(toolbox.typeDefinitions, /label<const Input extends/);
     assert.match(
@@ -79,7 +81,6 @@ export function testRuntime(options: {
           async () => ({}),
         ),
       ]),
-      environment: testEnvironment,
     });
 
     const invalid = await client.validate(
@@ -114,7 +115,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: weatherAlertToolbox,
-      environment: testEnvironment,
     });
 
     const syntax = await client.validate("async ({", AbortSignal.timeout(5_000));
@@ -164,7 +164,6 @@ export function testRuntime(options: {
           async () => ({}),
         ),
       ]),
-      environment: testEnvironment,
     });
     const extraArrayItem = await rowsClient.validate(`async ({ codemode }) => {
       const rows = [{ id: "1", extra: true }];
@@ -198,7 +197,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox,
-      environment: testEnvironment,
     });
     const telemetry = createTelemetryRecorder();
     const source = `async ({ codemode }: AgentProgramScope) => {
@@ -232,7 +230,6 @@ export function testRuntime(options: {
     const emptyClient = createClient({
       runtime,
       toolbox: createToolbox([]),
-      environment: testEnvironment,
     });
 
     const syntax = await emptyClient.run("async ({", {
@@ -272,7 +269,6 @@ export function testRuntime(options: {
     const failingClient = createClient({
       runtime,
       toolbox: createFailingToolbox(),
-      environment: testEnvironment,
     });
     const toolFailure = await failingClient.run(
       "async ({ codemode }) => { await codemode.fail({}); }",
@@ -351,7 +347,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: createLabelToolbox("telemetry"),
-      environment: testEnvironment,
     });
     const events: TelemetryEvent[] = [];
     const outcome = await client.run(stringifyTestAgentProgram(labelAgentProgram), {
@@ -377,7 +372,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: createToolbox([]),
-      environment: testEnvironment,
     });
     await assert.rejects(
       client.run("async () => {}", { signal: controller.signal }),
@@ -391,7 +385,6 @@ export function testRuntime(options: {
     const blockingClient = createClient({
       runtime,
       toolbox: blocking.toolbox,
-      environment: testEnvironment,
     });
     const during = new AbortController();
     const execution = blockingClient.run(
@@ -416,7 +409,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: blocking.toolbox,
-      environment: testEnvironment,
     });
 
     const result = client.run(
@@ -435,7 +427,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: createUnobservedFailureToolbox(),
-      environment: testEnvironment,
     });
 
     const outcome = await client.run(`async ({ codemode }) => {
@@ -513,7 +504,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: weatherAlertToolbox,
-      environment: testEnvironment,
     });
     const outcome = await client.run(stringifyTestAgentProgram(weatherAlertAgentProgram), {
       signal: AbortSignal.timeout(5_000),
@@ -527,7 +517,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: createToolbox([]),
-      environment: testEnvironment,
     });
     const telemetry = createTelemetryRecorder();
     const execution = client.run(stringifyTestAgentProgram(failureAgentProgram), {
@@ -551,7 +540,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: createToolbox([]),
-      environment: testEnvironment,
     });
 
     const validation = await client.validate(
@@ -569,7 +557,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: weatherAlertToolbox,
-      environment: testEnvironment,
     });
 
     const validation = await client.validate(
@@ -593,7 +580,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: weatherAlertToolbox,
-      environment: testEnvironment,
     });
 
     const outcome = await client.run(`async ({ codemode }) => {
@@ -611,7 +597,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: flightSearchToolbox,
-      environment: testEnvironment,
     });
 
     const outcome = await client.run(`async ({ codemode }) => {
@@ -636,7 +621,6 @@ export function testRuntime(options: {
     const dollarClient = createClient({
       runtime,
       toolbox: dollarNamedFlightSearchToolbox,
-      environment: testEnvironment,
     });
     const dollarOutcome = await dollarClient.run(`async ({ codemode }) => {
       await codemode.$lookup({ departureDate: "not-a-date" });
@@ -654,7 +638,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: invalidFlightOutputToolbox,
-      environment: testEnvironment,
     });
 
     const outcome = await client.run(`async ({ codemode }) => {
@@ -681,7 +664,6 @@ export function testRuntime(options: {
     const client = createClient({
       runtime,
       toolbox: telemetryToolbox.toolbox,
-      environment: testEnvironment,
     });
     const telemetry = createTelemetryRecorder();
 
@@ -747,11 +729,6 @@ export function testRuntime(options: {
     });
   });
 }
-
-const testEnvironment = {
-  description: "Test JavaScript runtime",
-  typeDefinitionFiles: [],
-} as const;
 
 interface Weather {
   readonly location: string;

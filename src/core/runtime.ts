@@ -11,7 +11,18 @@ export interface Program {
 }
 
 export interface Runtime {
+  /**
+   * Opaque context an embedder may present to an agent when describing the
+   * execution environment. Code mode does not interpret or present it.
+   */
+  readonly description: string;
+  loadTypeDefinitionFiles(): Promise<readonly TypeDefinitionFile[]>;
   start(req: StartRequest): Promise<RuntimeInstance>;
+}
+
+export interface TypeDefinitionFile {
+  readonly path: string;
+  readonly contents: string;
 }
 
 export interface RuntimeInstance {

@@ -2,22 +2,22 @@ import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
 
-import type { TypeDefinitionFile } from "../core/environment.ts";
+import type { TypeDefinitionFile } from "../core/runtime.ts";
 
 const require = createRequire(import.meta.url);
 
-let cachedNode24TypeDefinitions:
+let cachedNode24TypeDefinitionFiles:
   | Promise<readonly TypeDefinitionFile[]>
   | undefined;
 
-export function readNode24TypeDefinitions(): Promise<
+export function loadNode24TypeDefinitionFiles(): Promise<
   readonly TypeDefinitionFile[]
 > {
-  cachedNode24TypeDefinitions ??= readNode24TypeDefinitionsInner();
-  return cachedNode24TypeDefinitions;
+  cachedNode24TypeDefinitionFiles ??= loadNode24TypeDefinitionFilesInner();
+  return cachedNode24TypeDefinitionFiles;
 }
 
-async function readNode24TypeDefinitionsInner(): Promise<
+async function loadNode24TypeDefinitionFilesInner(): Promise<
   readonly TypeDefinitionFile[]
 > {
   const nodeTypesPackage = require.resolve("@types/node/package.json");

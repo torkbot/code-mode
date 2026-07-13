@@ -39,6 +39,10 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
 
   const finished: RuntimeFinished = { kind: "closed" };
   const runtime: Runtime = {
+    description: "Test JavaScript runtime",
+    async loadTypeDefinitionFiles() {
+      return [];
+    },
     async start(req) {
       observedProgram = req.program;
 
