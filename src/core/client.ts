@@ -39,7 +39,9 @@ export function createClient(req: CreateClientRequest): Client {
       source: string,
       signal: AbortSignal,
     ): Promise<ValidationResult> {
+      signal.throwIfAborted();
       const typeDefinitionFiles = await req.runtime.loadTypeDefinitionFiles();
+      signal.throwIfAborted();
       const typecheckFailure = await validateAgentSource({
         source,
         typeDefinitions: req.toolbox.typeDefinitions,
