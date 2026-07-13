@@ -2,22 +2,32 @@ import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
 
-import type { TypeDefinitionFile } from "../core/environment.ts";
+import { settleBeforeAbort } from "../core/abort.ts";
+import type { TypeDefinitionFile } from "../core/runtime.ts";
 
 const require = createRequire(import.meta.url);
 
-let cachedNode24TypeDefinitions:
+let cachedNode24TypeDefinitionFiles:
   | Promise<readonly TypeDefinitionFile[]>
   | undefined;
 
-export function readNode24TypeDefinitions(): Promise<
+export async function loadNode24TypeDefinitionFiles(
+  signal: AbortSignal,
+): Promise<
   readonly TypeDefinitionFile[]
 > {
-  cachedNode24TypeDefinitions ??= readNode24TypeDefinitionsInner();
-  return cachedNode24TypeDefinitions;
+  signal.throwIfAborted();
+  cachedNode24TypeDefinitionFiles ??= loadNode24TypeDefinitionFilesInner();
+  return await settleBeforeAbort(cachedNode24TypeDefinitionFiles, signal);
 }
 
-async function readNode24TypeDefinitionsInner(): Promise<
+export function assertNode24Version(version: string, context: string): void {
+  if (!/^v24\./.test(version)) {
+    throw new Error(`${context} requires Node.js 24, but reported ${version}`);
+  }
+}
+
+async function loadNode24TypeDefinitionFilesInner(): Promise<
   readonly TypeDefinitionFile[]
 > {
   const nodeTypesPackage = require.resolve("@types/node/package.json");

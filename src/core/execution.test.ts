@@ -36,6 +36,7 @@ test("execution terminates a live runtime when protocol processing fails", async
     finishRuntime = resolve;
   });
   const runtime: Runtime = {
+    ...testRuntimeMetadata,
     async start() {
       return {
         channel: {
@@ -84,10 +85,6 @@ test("execution terminates a live runtime when protocol processing fails", async
         },
       ),
     ]),
-    environment: {
-      description: "Protocol failure test environment.",
-      typeDefinitionFiles: [],
-    },
   });
 
   const result = client.run("async () => {}", { signal: AbortSignal.timeout(5_000) });
@@ -127,6 +124,7 @@ test("a terminal program error does not wait for a non-cooperative tool call", a
     markToolStarted = resolve;
   });
   const runtime: Runtime = {
+    ...testRuntimeMetadata,
     async start() {
       return {
         channel: {
@@ -175,10 +173,6 @@ test("a terminal program error does not wait for a non-cooperative tool call", a
         },
       ),
     ]),
-    environment: {
-      description: "Terminal program-error test environment.",
-      typeDefinitionFiles: [],
-    },
   });
 
   const outcome = await client.run("async () => {}", {
@@ -196,6 +190,7 @@ test("execution terminates a runtime after a completed protocol message", async 
     finishRuntime = resolve;
   });
   const runtime: Runtime = {
+    ...testRuntimeMetadata,
     async start() {
       return {
         channel: {
@@ -216,10 +211,6 @@ test("execution terminates a runtime after a completed protocol message", async 
   const client = createClient({
     runtime,
     toolbox: createToolbox([]),
-    environment: {
-      description: "Terminal completion test environment.",
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(await client.run("async () => {}", {
@@ -241,6 +232,7 @@ test("failed tool response writes reject without completion telemetry", async ()
     finishRuntime = resolve;
   });
   const runtime: Runtime = {
+    ...testRuntimeMetadata,
     async start() {
       return {
         channel: {
@@ -283,10 +275,6 @@ test("failed tool response writes reject without completion telemetry", async ()
         async () => ({}),
       ),
     ]),
-    environment: {
-      description: "Tool response telemetry test environment.",
-      typeDefinitionFiles: [],
-    },
   });
   const toolEvents: string[] = [];
 
@@ -318,6 +306,7 @@ test("execution rejects completion while a tool call is pending", async () => {
     finishRuntime = resolve;
   });
   const runtime: Runtime = {
+    ...testRuntimeMetadata,
     async start() {
       return {
         channel: {
@@ -339,10 +328,6 @@ test("execution rejects completion while a tool call is pending", async () => {
   const client = createClient({
     runtime,
     toolbox: createToolbox([]),
-    environment: {
-      description: "Pending tool completion test environment.",
-      typeDefinitionFiles: [],
-    },
   });
 
   await assert.rejects(
@@ -355,6 +340,7 @@ test("execution honors cancellation that occurs while the runtime starts", async
   const controller = new AbortController();
   let terminated = false;
   const runtime: Runtime = {
+    ...testRuntimeMetadata,
     async start() {
       controller.abort(new Error("cancel during runtime start"));
       return {
@@ -375,10 +361,6 @@ test("execution honors cancellation that occurs while the runtime starts", async
   const client = createClient({
     runtime,
     toolbox: createToolbox([]),
-    environment: {
-      description: "Runtime start cancellation test environment.",
-      typeDefinitionFiles: [],
-    },
   });
 
   await assert.rejects(
@@ -401,3 +383,10 @@ async function* fromChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Ar
     yield chunk;
   }
 }
+
+const testRuntimeMetadata = {
+  description: "Test JavaScript runtime",
+  async loadTypeDefinitionFiles() {
+    return [];
+  },
+} as const;

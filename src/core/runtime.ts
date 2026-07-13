@@ -11,7 +11,24 @@ export interface Program {
 }
 
 export interface Runtime {
+  /**
+   * Opaque context an embedder may present to an agent when describing the
+   * execution environment. Code mode does not interpret or present it.
+   */
+  readonly description: string;
+  /**
+   * Load checker declarations for this execution environment.
+   * Implementations must stop promptly when the signal aborts.
+   */
+  loadTypeDefinitionFiles(
+    signal: AbortSignal,
+  ): Promise<readonly TypeDefinitionFile[]>;
   start(req: StartRequest): Promise<RuntimeInstance>;
+}
+
+export interface TypeDefinitionFile {
+  readonly path: string;
+  readonly contents: string;
 }
 
 export interface RuntimeInstance {

@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { access } from "node:fs/promises";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 
 import { testRuntime } from "../testing/index.ts";
 import { createClient, createToolbox } from "../index.ts";
 import { HostNodeRuntime } from "./index.ts";
-import { readNode24TypeDefinitions } from "./node24.ts";
 
 async function createHostNodeRuntime(): Promise<HostNodeRuntime> {
   return new HostNodeRuntime(process.execPath);
@@ -16,9 +17,13 @@ testRuntime({
   createRuntime: createHostNodeRuntime,
 });
 
-test("host-node exports reusable Node 24 type definitions", async () => {
-  const typeDefinitions = await readNode24TypeDefinitions();
+test("host-node supplies its Node 24 checking environment", async () => {
+  const runtime = new HostNodeRuntime(process.execPath);
+  const typeDefinitions = await runtime.loadTypeDefinitionFiles(
+    AbortSignal.timeout(5_000),
+  );
 
+  assert.equal(runtime.description, "Node.js 24");
   assertTypeDefinitionExists(typeDefinitions, "node_modules/@types/node/index.d.ts");
   assertTypeDefinitionExists(typeDefinitions, "node_modules/undici-types/index.d.ts");
   assert.equal(
@@ -31,10 +36,6 @@ test("host-node runtime type definitions validate Node globals and node: imports
   const client = createClient({
     runtime: new HostNodeRuntime(process.execPath),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: await readNode24TypeDefinitions(),
-    },
   });
 
   const validation = await client.validate(`async () => {
@@ -64,10 +65,6 @@ test("host-node resolves package imports from the runtime working directory", as
   const client = createClient({
     runtime: await createHostNodeRuntime(),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(
@@ -83,10 +80,6 @@ test("host-node escalates termination when a program ignores SIGTERM", async () 
   const client = createClient({
     runtime: await createHostNodeRuntime(),
     toolbox: createToolbox([]),
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: [],
-    },
   });
 
   assert.deepEqual(
@@ -142,16 +135,31 @@ test("host-node bounds stderr retained for process failures", async () => {
   assert.ok(finished.error.message.length < 66_000);
 });
 
+test("host-node rejects binaries outside its Node 24 target", async () => {
+  const runtime = new HostNodeRuntime("/bin/echo");
+
+  await assert.rejects(
+    runtime.loadTypeDefinitionFiles(AbortSignal.timeout(5_000)),
+    /requires Node\.js 24/,
+  );
+});
+
 test("host-node rejects writes when the child closes its pipe", {
   timeout: 5_000,
 }, async (t) => {
-  const immediateExitPath = "/usr/bin/false";
-  try {
-    await access(immediateExitPath);
-  } catch {
-    t.skip(`${immediateExitPath} is not available`);
-    return;
-  }
+  const directory = await mkdtemp(join(tmpdir(), "code-mode-node-"));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const immediateExitPath = join(directory, "node");
+  await writeFile(immediateExitPath, [
+    "#!/bin/sh",
+    "if [ \"$1\" = \"--version\" ]; then",
+    "  echo v24.0.0",
+    "  exit 0",
+    "fi",
+    "exit 1",
+    "",
+  ].join("\n"));
+  await chmod(immediateExitPath, 0o755);
 
   const runtime = new HostNodeRuntime(immediateExitPath);
 

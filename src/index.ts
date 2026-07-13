@@ -1,9 +1,7 @@
 export type {
   Runtime,
+  TypeDefinitionFile,
 } from "./core/runtime.ts";
-export type {
-  CodeModeEnvironment,
-} from "./core/environment.ts";
 export type {
   Toolbox,
   ToolSchema,

@@ -51,6 +51,10 @@ test("public root and host-node sub-path exports are declared", async () => {
 
 test("public root export is focused on toolbox and client APIs", async () => {
   const rootExport = await readFile(new URL("./index.ts", import.meta.url), "utf8");
+  const hostNodeExport = await readFile(
+    new URL("./host-node/index.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.match(rootExport, /createToolbox/);
   assert.match(rootExport, /defineTool/);
@@ -60,7 +64,7 @@ test("public root export is focused on toolbox and client APIs", async () => {
   assert.match(rootExport, /RunOutcome/);
   assert.match(rootExport, /TelemetryEvent/);
   assert.match(rootExport, /Runtime/);
-  assert.match(rootExport, /CodeModeEnvironment/);
+  assert.match(rootExport, /TypeDefinitionFile/);
   assert.match(rootExport, /ToolSchema/);
 
   assert.doesNotMatch(rootExport, /CodeModeRuntime/);
@@ -71,21 +75,21 @@ test("public root export is focused on toolbox and client APIs", async () => {
   assert.doesNotMatch(rootExport, /createProgram/);
   assert.doesNotMatch(rootExport, /startProgram/);
   assert.doesNotMatch(rootExport, /ByteChannel/);
+  assert.doesNotMatch(hostNodeExport, /readNode24TypeDefinitions/);
 });
 
-test("runtime transport contract does not own type definitions", async () => {
+test("runtime owns its description and checking type definitions", async () => {
   const runtime = await readFile(new URL("./core/runtime.ts", import.meta.url), "utf8");
   const client = await readFile(new URL("./core/client.ts", import.meta.url), "utf8");
-  const environment = await readFile(
-    new URL("./core/environment.ts", import.meta.url),
-    "utf8",
-  );
 
-  assert.doesNotMatch(runtime, /getTypeDefinitions/);
-  assert.doesNotMatch(runtime, /TypeDefinitionFile|typeDefinitionFiles/);
-  assert.match(client, /readonly environment: CodeModeEnvironment/);
-  assert.match(environment, /readonly description: string/);
-  assert.match(environment, /readonly typeDefinitionFiles/);
+  assert.match(runtime, /readonly description: string/);
+  assert.match(
+    runtime,
+    /loadTypeDefinitionFiles\(\s*signal: AbortSignal,?\s*\)/,
+  );
+  assert.match(runtime, /interface TypeDefinitionFile/);
+  assert.match(client, /req\.runtime\.loadTypeDefinitionFiles\(signal\)/);
+  assert.doesNotMatch(client, /CodeModeEnvironment|readonly environment:/);
 });
 
 test("runtime contract tests exercise only the public contract surface", async () => {

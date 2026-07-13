@@ -2,7 +2,7 @@ import { API } from "typescript/unstable/async";
 import type { Diagnostic } from "typescript/unstable/async";
 import type { FileSystem, FileSystemEntries } from "typescript/unstable/fs";
 
-import type { TypeDefinitionFile } from "../environment.ts";
+import type { TypeDefinitionFile } from "../runtime.ts";
 
 export interface ValidateAgentSourceRequest {
   readonly source: string;

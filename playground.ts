@@ -1,7 +1,4 @@
-import {
-  HostNodeRuntime,
-  readNode24TypeDefinitions,
-} from "./src/host-node/index.ts";
+import { HostNodeRuntime } from "./src/host-node/index.ts";
 import { createClient, createToolbox, defineTool } from "./src/index.ts";
 import { testSchema } from "./src/testing/schema.ts";
 
@@ -63,10 +60,6 @@ async function main() {
   const client = createClient({
     runtime,
     toolbox,
-    environment: {
-      description: `Node.js ${process.version}`,
-      typeDefinitionFiles: await readNode24TypeDefinitions(),
-    },
   });
 
   console.log(toolbox.typeDefinitions);

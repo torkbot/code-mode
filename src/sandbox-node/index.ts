@@ -5,12 +5,17 @@ import type {
   RuntimeFinished,
   RuntimeInstance,
   StartRequest,
+  TypeDefinitionFile,
 } from "../core/runtime.ts";
 import {
   createNodeBootstrapSource,
   nodeChannelFd,
   nodeChannelFdEnvironmentVariable,
 } from "../node-runtime/bootstrap.ts";
+import {
+  assertNode24Version,
+  loadNode24TypeDefinitionFiles,
+} from "../node-runtime/node24.ts";
 
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
@@ -56,9 +61,11 @@ export interface SandboxNodeProcessExit {
 }
 
 export class SandboxNodeRuntime implements Runtime {
+  readonly description = "Node.js 24";
   readonly #sandbox: SandboxNodeHost;
   readonly #nodePath: string;
   readonly #cwd: string;
+  #node24Validated = false;
 
   constructor(options: SandboxNodeRuntimeOptions) {
     this.#sandbox = options.sandbox;
@@ -66,8 +73,16 @@ export class SandboxNodeRuntime implements Runtime {
     this.#cwd = options.cwd;
   }
 
+  async loadTypeDefinitionFiles(
+    signal: AbortSignal,
+  ): Promise<readonly TypeDefinitionFile[]> {
+    await this.#assertNode24(signal);
+    return loadNode24TypeDefinitionFiles(signal);
+  }
+
   async start(req: StartRequest): Promise<RuntimeInstance> {
     req.signal.throwIfAborted();
+    await this.#assertNode24(req.signal);
 
     const process = this.#sandbox.spawn(this.#nodePath, ["--input-type=module"], {
       cwd: this.#cwd,
@@ -173,6 +188,81 @@ export class SandboxNodeRuntime implements Runtime {
         await finished;
       },
     };
+  }
+
+  async #assertNode24(signal: AbortSignal): Promise<void> {
+    signal.throwIfAborted();
+    if (this.#node24Validated) {
+      return;
+    }
+
+    const version = await readSandboxNodeVersion({
+      sandbox: this.#sandbox,
+      nodePath: this.#nodePath,
+      cwd: this.#cwd,
+      signal,
+    });
+    assertNode24Version(
+      version,
+      `Sandbox Node runtime binary ${this.#nodePath}`,
+    );
+    this.#node24Validated = true;
+  }
+}
+
+interface ReadSandboxNodeVersionRequest {
+  readonly sandbox: SandboxNodeHost;
+  readonly nodePath: string;
+  readonly cwd: string;
+  readonly signal: AbortSignal;
+}
+
+async function readSandboxNodeVersion(
+  req: ReadSandboxNodeVersionRequest,
+): Promise<string> {
+  req.signal.throwIfAborted();
+  const process = req.sandbox.spawn(req.nodePath, ["--version"], {
+    cwd: req.cwd,
+    env: {},
+    pipes: [],
+  });
+  let forceTerminationTimeout: ReturnType<typeof setTimeout> | undefined;
+  const abort = (): void => {
+    process.kill("SIGTERM");
+    forceTerminationTimeout ??= setTimeout(() => {
+      process.kill("SIGKILL");
+    }, terminationGracePeriodMilliseconds);
+  };
+
+  if (req.signal.aborted) {
+    abort();
+  } else {
+    req.signal.addEventListener("abort", abort, { once: true });
+  }
+
+  try {
+    const [launchError, exit, stdout, stderr] = await Promise.all([
+      process.ready.then(
+        () => null,
+        (error: unknown) => errorFromUnknown(error),
+      ),
+      process.exit,
+      readText(process.stdout),
+      readText(process.stderr),
+    ]);
+    req.signal.throwIfAborted();
+    if (launchError !== null) {
+      throw launchError;
+    }
+    if (exit.exitCode !== 0 || exit.signal !== null) {
+      throw new Error(formatProcessFailure(exit, stderr));
+    }
+    return stdout.trim();
+  } finally {
+    req.signal.removeEventListener("abort", abort);
+    if (forceTerminationTimeout !== undefined) {
+      clearTimeout(forceTerminationTimeout);
+    }
   }
 }
 

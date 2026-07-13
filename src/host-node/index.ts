@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import type { Duplex, Readable, Writable } from "node:stream";
 
 import type {
@@ -8,27 +8,40 @@ import type {
   RuntimeFinished,
   RuntimeInstance,
   StartRequest,
+  TypeDefinitionFile,
 } from "../core/runtime.ts";
 import {
   createNodeBootstrapSource,
   nodeChannelFd,
   nodeChannelFdEnvironmentVariable,
 } from "../node-runtime/bootstrap.ts";
-
-export { readNode24TypeDefinitions } from "./node24.ts";
+import {
+  assertNode24Version,
+  loadNode24TypeDefinitionFiles,
+} from "../node-runtime/node24.ts";
 
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
+const validatedNode24Paths = new Set<string>();
 
 export class HostNodeRuntime implements Runtime {
+  readonly description = "Node.js 24";
   readonly #nodePath: string;
 
   constructor(nodePath: string) {
     this.#nodePath = nodePath;
   }
 
+  async loadTypeDefinitionFiles(
+    signal: AbortSignal,
+  ): Promise<readonly TypeDefinitionFile[]> {
+    await assertHostNode24(this.#nodePath, signal);
+    return loadNode24TypeDefinitionFiles(signal);
+  }
+
   async start(req: StartRequest): Promise<RuntimeInstance> {
     req.signal.throwIfAborted();
+    await assertHostNode24(this.#nodePath, req.signal);
     const { NODE_OPTIONS: _nodeOptions, ...environment } = process.env;
 
     const child = spawn(this.#nodePath, ["--input-type=module"], {
@@ -148,6 +161,44 @@ export class HostNodeRuntime implements Runtime {
       },
     };
   }
+}
+
+async function assertHostNode24(
+  nodePath: string,
+  signal: AbortSignal,
+): Promise<void> {
+  signal.throwIfAborted();
+  if (validatedNode24Paths.has(nodePath)) {
+    return;
+  }
+
+  const version = await readHostNodeVersion(nodePath, signal);
+  assertNode24Version(version, `Host Node.js runtime binary ${nodePath}`);
+  validatedNode24Paths.add(nodePath);
+}
+
+function readHostNodeVersion(
+  nodePath: string,
+  signal: AbortSignal,
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(
+      nodePath,
+      ["--version"],
+      { encoding: "utf8", signal },
+      (error, stdout) => {
+        if (signal.aborted) {
+          reject(signal.reason);
+          return;
+        }
+        if (error !== null) {
+          reject(error);
+          return;
+        }
+        resolve(stdout.trim());
+      },
+    );
+  });
 }
 
 function appendTextTail(current: string, chunk: string): string {
