@@ -16,7 +16,13 @@ export interface Runtime {
    * execution environment. Code mode does not interpret or present it.
    */
   readonly description: string;
-  loadTypeDefinitionFiles(): Promise<readonly TypeDefinitionFile[]>;
+  /**
+   * Load checker declarations for this execution environment.
+   * Implementations must stop promptly when the signal aborts.
+   */
+  loadTypeDefinitionFiles(
+    signal: AbortSignal,
+  ): Promise<readonly TypeDefinitionFile[]>;
   start(req: StartRequest): Promise<RuntimeInstance>;
 }
 

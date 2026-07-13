@@ -24,17 +24,28 @@ test("validation does not load runtime types after cancellation", async () => {
   assert.equal(loaded, false);
 });
 
-test("validation honors cancellation that occurs while runtime types load", async () => {
+test("validation does not wait for runtime types after cancellation", async () => {
   const reason = new Error("validation cancelled during type loading");
   const controller = new AbortController();
-  const runtime = createTestRuntime(async () => {
-    controller.abort(reason);
-    return [];
+  let markLoadingStarted: (() => void) | undefined;
+  let runtimeSignal: AbortSignal | undefined;
+  const loadingStarted = new Promise<void>((resolve) => {
+    markLoadingStarted = resolve;
+  });
+  const runtime = createTestRuntime(async (signal) => {
+    runtimeSignal = signal;
+    markLoadingStarted?.();
+    return await new Promise<never>(() => {});
   });
   const client = createClient({ runtime, toolbox: createToolbox([]) });
 
+  const validation = client.validate("async () => {}", controller.signal);
+  await loadingStarted;
+  assert.equal(runtimeSignal, controller.signal);
+  controller.abort(reason);
+
   await assert.rejects(
-    client.validate("async () => {}", controller.signal),
+    validation,
     (error) => error === reason,
   );
 });

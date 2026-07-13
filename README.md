@@ -14,8 +14,8 @@ self-contained JavaScript module, and provides a bidirectional byte channel.
 npm install @torkbot/code-mode
 ```
 
-The host library requires Node.js 24 or newer. The first execution adapters are
-host Node.js and Node.js inside `@torkbot/sandbox`.
+The host library requires Node.js 24 or newer. The first execution adapters
+target Node.js 24 on the host and inside `@torkbot/sandbox`.
 
 ## Quick Start
 
@@ -142,6 +142,8 @@ returned by `runtime.loadTypeDefinitionFiles()` at their supplied virtual paths.
 Runtime type files are checker-only; they are not included in agent declarations
 or sent to the execution runtime. Because the runtime supplies both these files
 and the execution channel, checking and execution describe the same target.
+Type loading participates in validation cancellation and must stop promptly when
+its signal aborts.
 Validation enforces the same erasable-only TypeScript subset that execution can
 strip. Diagnostics use submitted-source positions; diagnostics and reports are
 serializable and bounded.
@@ -196,7 +198,9 @@ Runtime authors import `Runtime` from `@torkbot/code-mode`:
 ```ts
 interface Runtime {
   readonly description: string;
-  loadTypeDefinitionFiles(): Promise<readonly TypeDefinitionFile[]>;
+  loadTypeDefinitionFiles(
+    signal: AbortSignal,
+  ): Promise<readonly TypeDefinitionFile[]>;
   start(request: {
     readonly program: {
       readonly source: string;
@@ -249,11 +253,11 @@ detail.
 const runtime = new HostNodeRuntime(process.execPath);
 ```
 
-The required path is used to spawn a child Node.js process. The generated module
-is loaded in memory against a virtual file URL rooted at the child working
-directory, so bare dynamic imports use normal Node.js package resolution. The
-byte channel uses fd 3. The runtime supplies the bundled Node.js 24 declarations
-to the checker.
+The required path must identify a Node.js 24 binary and is checked before type
+loading or execution. The generated module is loaded in memory against a virtual
+file URL rooted at the child working directory, so bare dynamic imports use
+normal Node.js package resolution. The byte channel uses fd 3. The runtime
+supplies the bundled Node.js 24 declarations to the checker.
 
 ### Sandbox Node.js
 
@@ -271,7 +275,9 @@ The sandbox host must support streaming spawn with caller-selected full-duplex
 descriptors. The adapter requests fd 3, streams a self-contained bootstrap over
 stdin, and uses fd 3 exclusively for code-mode traffic. The generated module is
 anchored at `cwd` for package resolution without writing a runtime file.
-The runtime supplies the bundled Node.js 24 declarations to the checker.
+`nodePath` must identify Node.js 24 and is checked inside the sandbox before type
+loading or execution. The runtime supplies the bundled Node.js 24 declarations
+to the checker.
 
 ## Runtime Conformance
 

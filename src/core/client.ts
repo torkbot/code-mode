@@ -1,4 +1,4 @@
-import type { Runtime } from "./runtime.ts";
+import type { Runtime, TypeDefinitionFile } from "./runtime.ts";
 import type { RunOutcome } from "./execution.ts";
 import { execute } from "./execution.ts";
 import type { TelemetryCallback } from "./telemetry.ts";
@@ -39,9 +39,10 @@ export function createClient(req: CreateClientRequest): Client {
       source: string,
       signal: AbortSignal,
     ): Promise<ValidationResult> {
-      signal.throwIfAborted();
-      const typeDefinitionFiles = await req.runtime.loadTypeDefinitionFiles();
-      signal.throwIfAborted();
+      const typeDefinitionFiles = await loadRuntimeTypeDefinitionFiles(
+        req.runtime,
+        signal,
+      );
       const typecheckFailure = await validateAgentSource({
         source,
         typeDefinitions: req.toolbox.typeDefinitions,
@@ -70,4 +71,45 @@ export function createClient(req: CreateClientRequest): Client {
       });
     },
   };
+}
+
+function loadRuntimeTypeDefinitionFiles(
+  runtime: Runtime,
+  signal: AbortSignal,
+): Promise<readonly TypeDefinitionFile[]> {
+  return new Promise((resolve, reject) => {
+    const cleanup = (): void => {
+      signal.removeEventListener("abort", abort);
+    };
+    const abort = (): void => {
+      cleanup();
+      reject(signal.reason);
+    };
+
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) {
+      abort();
+      return;
+    }
+
+    let loading: Promise<readonly TypeDefinitionFile[]>;
+    try {
+      loading = runtime.loadTypeDefinitionFiles(signal);
+    } catch (error) {
+      cleanup();
+      reject(error);
+      return;
+    }
+
+    void loading.then(
+      (files) => {
+        cleanup();
+        resolve(files);
+      },
+      (error: unknown) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
 }

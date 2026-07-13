@@ -23,7 +23,9 @@ testRuntime({
 
 test("sandbox-node supplies its Node 24 checking environment", async () => {
   const runtime = createSandboxNodeRuntime();
-  const typeDefinitions = await runtime.loadTypeDefinitionFiles();
+  const typeDefinitions = await runtime.loadTypeDefinitionFiles(
+    AbortSignal.timeout(5_000),
+  );
 
   assert.equal(runtime.description, "Node.js 24");
   assert.equal(
@@ -42,7 +44,10 @@ test("sandbox-node observes a signal aborted during spawn", async () => {
   });
   const writable = (): WritableStream<Uint8Array> => new WritableStream();
   const sandbox: SandboxNodeHost = {
-    spawn() {
+    spawn(_command, args) {
+      if (args[0] === "--version") {
+        return createNodeVersionProcess("v24.0.0");
+      }
       controller.abort(new Error("cancel during spawn"));
       return {
         stdin: writable(),
@@ -86,7 +91,10 @@ test("sandbox-node preserves cancellation during bootstrap writes", async () => 
     },
   });
   const sandbox: SandboxNodeHost = {
-    spawn() {
+    spawn(_command, args) {
+      if (args[0] === "--version") {
+        return createNodeVersionProcess("v24.0.0");
+      }
       return {
         stdin: new WritableStream({
           write() {
@@ -120,6 +128,23 @@ test("sandbox-node preserves cancellation during bootstrap writes", async () => 
     program: { source: "export async function startProgram() {}" },
     signal: controller.signal,
   }), (error) => error === reason);
+});
+
+test("sandbox-node rejects binaries outside its Node 24 target", async () => {
+  const runtime = new SandboxNodeRuntime({
+    sandbox: {
+      spawn() {
+        return createNodeVersionProcess("v23.0.0");
+      },
+    },
+    nodePath: "/usr/bin/node",
+    cwd: "/workspace",
+  });
+
+  await assert.rejects(
+    runtime.loadTypeDefinitionFiles(AbortSignal.timeout(5_000)),
+    /requires Node\.js 24/,
+  );
 });
 
 test("sandbox-node bounds stderr retained for process failures", async () => {
@@ -185,6 +210,29 @@ function createSandboxNodeRuntime(): SandboxNodeRuntime {
     nodePath: process.execPath,
     cwd: process.cwd(),
   });
+}
+
+function createNodeVersionProcess(version: string): SandboxNodeProcess {
+  const readable = (text: string): ReadableStream<Uint8Array> => (
+    new ReadableStream({
+      start(controller) {
+        if (text.length > 0) {
+          controller.enqueue(new TextEncoder().encode(text));
+        }
+        controller.close();
+      },
+    })
+  );
+
+  return {
+    stdin: new WritableStream(),
+    stdout: readable(`${version}\n`),
+    stderr: readable(""),
+    pipes: new Map(),
+    ready: Promise.resolve(),
+    exit: Promise.resolve({ exitCode: 0, signal: null }),
+    kill() {},
+  };
 }
 
 class HostBackedSandbox implements SandboxNodeHost {

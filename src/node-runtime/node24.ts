@@ -10,11 +10,22 @@ let cachedNode24TypeDefinitionFiles:
   | Promise<readonly TypeDefinitionFile[]>
   | undefined;
 
-export function loadNode24TypeDefinitionFiles(): Promise<
+export async function loadNode24TypeDefinitionFiles(
+  signal: AbortSignal,
+): Promise<
   readonly TypeDefinitionFile[]
 > {
+  signal.throwIfAborted();
   cachedNode24TypeDefinitionFiles ??= loadNode24TypeDefinitionFilesInner();
-  return cachedNode24TypeDefinitionFiles;
+  const files = await cachedNode24TypeDefinitionFiles;
+  signal.throwIfAborted();
+  return files;
+}
+
+export function assertNode24Version(version: string, context: string): void {
+  if (!/^v24\./.test(version)) {
+    throw new Error(`${context} requires Node.js 24, but reported ${version}`);
+  }
 }
 
 async function loadNode24TypeDefinitionFilesInner(): Promise<
