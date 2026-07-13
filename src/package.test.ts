@@ -83,9 +83,12 @@ test("runtime owns its description and checking type definitions", async () => {
   const client = await readFile(new URL("./core/client.ts", import.meta.url), "utf8");
 
   assert.match(runtime, /readonly description: string/);
-  assert.match(runtime, /loadTypeDefinitionFiles\(signal: AbortSignal\)/);
+  assert.match(
+    runtime,
+    /loadTypeDefinitionFiles\(\s*signal: AbortSignal,?\s*\)/,
+  );
   assert.match(runtime, /interface TypeDefinitionFile/);
-  assert.match(client, /runtime\.loadTypeDefinitionFiles\(signal\)/);
+  assert.match(client, /req\.runtime\.loadTypeDefinitionFiles\(signal\)/);
   assert.doesNotMatch(client, /CodeModeEnvironment|readonly environment:/);
 });
 

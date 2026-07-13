@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, relative, sep } from "node:path";
 
+import { settleBeforeAbort } from "../core/abort.ts";
 import type { TypeDefinitionFile } from "../core/runtime.ts";
 
 const require = createRequire(import.meta.url);
@@ -17,9 +18,7 @@ export async function loadNode24TypeDefinitionFiles(
 > {
   signal.throwIfAborted();
   cachedNode24TypeDefinitionFiles ??= loadNode24TypeDefinitionFilesInner();
-  const files = await cachedNode24TypeDefinitionFiles;
-  signal.throwIfAborted();
-  return files;
+  return await settleBeforeAbort(cachedNode24TypeDefinitionFiles, signal);
 }
 
 export function assertNode24Version(version: string, context: string): void {
