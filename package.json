@@ -1,6 +1,6 @@
 {
   "name": "@torkbot/code-mode",
-  "version": "0.0.0-dev",
+  "version": "0.1.0",
   "private": false,
   "type": "module",
   "description": "Runtime-agnostic code-mode program launcher contracts and adapters.",
