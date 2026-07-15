@@ -1,10 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type {
-  ByteChannel,
-  RuntimeInstance,
-} from "../core/runtime.ts";
+import type { RuntimeInstance } from "../core/runtime.ts";
 import {
   Node24Runtime,
   type Node24RuntimeHost,
@@ -34,8 +31,9 @@ test("node adapter turns a runtime payload into a caller-launched Node entrypoin
     payload: {
       kind: "javascript-module",
       source: `export async function startProgram(channel) {
-        await channel.outgoing.write(new TextEncoder().encode("payload sentinel"));
-        await channel.outgoing.close();
+        const writer = channel.writable.getWriter();
+        await writer.write(new TextEncoder().encode("payload sentinel"));
+        await writer.close();
       }`,
     },
     signal,
@@ -85,12 +83,9 @@ test("node adapter rejects a non-Node-24 target before launch", async () => {
 });
 
 function createClosedRuntimeInstance(): RuntimeInstance {
-  const channel: ByteChannel = {
-    incoming: noBytes(),
-    outgoing: {
-      async write() {},
-      async close() {},
-    },
+  const channel: RuntimeInstance["channel"] = {
+    readable: new ReadableStream({ start(controller) { controller.close(); } }),
+    writable: new WritableStream(),
   };
 
   return {
@@ -99,5 +94,3 @@ function createClosedRuntimeInstance(): RuntimeInstance {
     async terminate() {},
   };
 }
-
-async function* noBytes(): AsyncIterable<Uint8Array> {}

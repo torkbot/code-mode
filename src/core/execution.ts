@@ -113,11 +113,12 @@ async function runRuntimeInstance(
 ): Promise<RunOutcome> {
   const pendingToolCalls = new Set<Promise<void>>();
   const toolCallFailure = Promise.withResolvers<never>();
+  const outgoing = instance.channel.writable.getWriter();
   let writeQueue: Promise<void> = Promise.resolve();
 
   const writeResponse = async (message: HostMessage): Promise<void> => {
     const write = writeQueue.then(async () => {
-      await writeHostMessage(instance.channel.outgoing, message);
+      await writeHostMessage(outgoing, message);
     });
     writeQueue = write.catch(() => {});
     await write;
@@ -200,7 +201,7 @@ async function runRuntimeInstance(
     }
   };
 
-  const messages = readProgramMessages(instance.channel.incoming)[Symbol.asyncIterator]();
+  const messages = readProgramMessages(instance.channel.readable)[Symbol.asyncIterator]();
   for (;;) {
     const next = await Promise.race([
       messages.next(),
@@ -240,7 +241,7 @@ async function runRuntimeInstance(
       }
       await instance.terminate("Code-mode program failed");
       try {
-        await instance.channel.outgoing.close();
+        await outgoing.close();
       } catch {
         // The program may have closed the channel after sending its terminal error.
       }
@@ -262,7 +263,7 @@ async function runRuntimeInstance(
       }
       await instance.terminate("Code-mode program completed");
       try {
-        await instance.channel.outgoing.close();
+        await outgoing.close();
       } catch {
         // The program may have closed the channel after sending completion.
       }

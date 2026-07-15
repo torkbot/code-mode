@@ -57,55 +57,51 @@ if (typeof start !== "function") {
   throw new Error("Code-mode source program must export startProgram()");
 }
 
-await start({
-  incoming: readableChunks(input),
-  outgoing: {
-    async write(chunk) {
-      if (output.destroyed || output.writableEnded) {
-        throw new Error("Code-mode byte channel is closed");
-      }
-      if (!output.write(chunk)) {
-        await once(output, "drain");
-      }
-    },
-    async close() {
-      await closeWritable(output);
-    },
+const inputIterator = input[Symbol.asyncIterator]();
+const readable = new ReadableStream({
+  async pull(controller) {
+    const next = await inputIterator.next();
+    if (next.done) {
+      controller.close();
+      return;
+    }
+    if (!(next.value instanceof Uint8Array)) {
+      controller.error(new Error("Code-mode byte channel emitted an unsupported chunk"));
+      return;
+    }
+    controller.enqueue(next.value);
+  },
+  cancel() {
+    input.destroy();
+  },
+}, { highWaterMark: 0 });
+const writable = new WritableStream({
+  async write(chunk) {
+    if (!output.write(chunk)) {
+      await once(output, "drain");
+    }
+  },
+  async close() {
+    await new Promise((resolve, reject) => {
+      const cleanup = () => {
+        output.off("error", onError);
+        output.off("finish", onFinish);
+      };
+      const onError = (error) => {
+        cleanup();
+        reject(error);
+      };
+      const onFinish = () => {
+        cleanup();
+        resolve();
+      };
+      output.once("error", onError);
+      output.once("finish", onFinish);
+      output.end();
+    });
   },
 });
 
-async function closeWritable(writable) {
-  if (writable.destroyed || writable.writableEnded) {
-    return;
-  }
-
-  await new Promise((resolve, reject) => {
-    const cleanup = () => {
-      writable.off("error", onError);
-      writable.off("finish", onFinish);
-    };
-    const onError = (error) => {
-      cleanup();
-      reject(error);
-    };
-    const onFinish = () => {
-      cleanup();
-      resolve();
-    };
-
-    writable.once("error", onError);
-    writable.once("finish", onFinish);
-    writable.end();
-  });
-}
-
-async function* readableChunks(readable) {
-  for await (const chunk of readable) {
-    if (!(chunk instanceof Uint8Array)) {
-      throw new Error("Code-mode byte channel emitted an unsupported chunk");
-    }
-    yield chunk;
-  }
-}
+await start({ readable, writable });
 `;
 }

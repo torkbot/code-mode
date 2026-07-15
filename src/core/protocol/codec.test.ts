@@ -160,8 +160,13 @@ async function collect<T>(values: AsyncIterable<T>): Promise<T[]> {
   return collected;
 }
 
-async function* fromChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
-  for (const chunk of chunks) {
-    yield chunk;
-  }
+function fromChunks(chunks: readonly Uint8Array[]): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
 }

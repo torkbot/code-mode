@@ -97,8 +97,6 @@ test("runtime-author and Node adapter exports expose the complete ownership boun
   );
 
   for (const typeName of [
-    "ByteChannel",
-    "ByteWriter",
     "Runtime",
     "RuntimeFinished",
     "RuntimeInstance",
@@ -108,11 +106,14 @@ test("runtime-author and Node adapter exports expose the complete ownership boun
   ]) {
     assert.match(runtimeExport, new RegExp(`\\b${typeName}\\b`));
   }
+  assert.doesNotMatch(runtimeExport, /ByteChannel|ByteWriter/);
 
   assert.match(runtimeContract, /readonly payload: RuntimePayload/);
   assert.match(runtimeContract, /readonly kind: "javascript-module"/);
   assert.match(runtimeContract, /startProgram\(channel\)/);
   assert.match(runtimeContract, /other endpoint/);
+  assert.match(runtimeContract, /ReadableStream<Uint8Array>/);
+  assert.match(runtimeContract, /WritableStream<Uint8Array>/);
   assert.match(runtimeContract, /Runtime failures are values/);
   assert.match(runtimeContract, /Calls are\s+\* idempotent/);
 
