@@ -91,10 +91,31 @@ test("host-node escalates termination when a program ignores SIGTERM", async () 
   );
 });
 
+test("host-node runtime termination is idempotent", async () => {
+  const runtime = await createHostNodeRuntime();
+  const instance = await runtime.start({
+    payload: {
+      kind: "javascript-module",
+      source: `export async function startProgram() {
+        setInterval(() => {}, 1_000);
+      }`,
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  await Promise.all([
+    instance.terminate("first termination request"),
+    instance.terminate("second termination request"),
+  ]);
+
+  assert.deepEqual(await instance.finished, { kind: "closed" });
+});
+
 test("host-node streams programs larger than process argument limits", async () => {
   const runtime = await createHostNodeRuntime();
   const instance = await runtime.start({
-    program: {
+    payload: {
+      kind: "javascript-module",
       source: [
         "export async function startProgram(channel) {",
         "  await channel.outgoing.close();",
@@ -115,7 +136,8 @@ test("host-node streams programs larger than process argument limits", async () 
 test("host-node bounds stderr retained for process failures", async () => {
   const runtime = await createHostNodeRuntime();
   const instance = await runtime.start({
-    program: {
+    payload: {
+      kind: "javascript-module",
       source: `export async function startProgram(channel) {
         await channel.outgoing.close();
         process.stderr.write("x".repeat(100_000) + "stderr sentinel");
@@ -165,7 +187,8 @@ test("host-node rejects writes when the child closes its pipe", {
 
   await assert.rejects(
     runtime.start({
-      program: {
+      payload: {
+        kind: "javascript-module",
         source: "x".repeat(2 * 1024 * 1024),
       },
       signal: AbortSignal.timeout(4_000),
@@ -179,7 +202,10 @@ test("host-node reports cancellation while streaming the bootstrap", async () =>
   const reason = new Error("bootstrap cancelled");
   const runtime = new HostNodeRuntime(process.execPath);
   const start = runtime.start({
-    program: { source: "x".repeat(16 * 1024 * 1024) },
+    payload: {
+      kind: "javascript-module",
+      source: "x".repeat(16 * 1024 * 1024),
+    },
     signal: controller.signal,
   });
 

@@ -4,56 +4,67 @@ import type { Duplex, Readable, Writable } from "node:stream";
 import type {
   ByteChannel,
   ByteWriter,
-  Runtime,
   RuntimeFinished,
   RuntimeInstance,
-  StartRequest,
-  TypeDefinitionFile,
 } from "../core/runtime.ts";
 import {
-  createNodeBootstrapSource,
-  nodeChannelFd,
-  nodeChannelFdEnvironmentVariable,
-} from "../node-runtime/bootstrap.ts";
-import {
-  assertNode24Version,
-  loadNode24TypeDefinitionFiles,
-} from "../node-runtime/node24.ts";
+  Node24Runtime,
+  type Node24RuntimeHost,
+  type Node24RuntimeLaunchRequest,
+} from "../node/index.ts";
 
 const maximumStderrLength = 64 * 1024;
 const terminationGracePeriodMilliseconds = 1_000;
-const validatedNode24Paths = new Set<string>();
+const nodeVersionsByPath = new Map<string, string>();
 
-export class HostNodeRuntime implements Runtime {
-  readonly description = "Node.js 24";
+export class HostNodeRuntime extends Node24Runtime {
+  constructor(nodePath: string) {
+    super(new HostNodeRuntimeHost(nodePath));
+  }
+}
+
+class HostNodeRuntimeHost implements Node24RuntimeHost {
   readonly #nodePath: string;
 
   constructor(nodePath: string) {
     this.#nodePath = nodePath;
   }
 
-  async loadTypeDefinitionFiles(
+  async readNodeVersion(
     signal: AbortSignal,
-  ): Promise<readonly TypeDefinitionFile[]> {
-    await assertHostNode24(this.#nodePath, signal);
-    return loadNode24TypeDefinitionFiles(signal);
+  ): Promise<string> {
+    signal.throwIfAborted();
+    const cached = nodeVersionsByPath.get(this.#nodePath);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    const version = await readHostNodeVersion(this.#nodePath, signal);
+    nodeVersionsByPath.set(this.#nodePath, version);
+    return version;
   }
 
-  async start(req: StartRequest): Promise<RuntimeInstance> {
+  async launchNode(req: Node24RuntimeLaunchRequest): Promise<RuntimeInstance> {
     req.signal.throwIfAborted();
-    await assertHostNode24(this.#nodePath, req.signal);
     const { NODE_OPTIONS: _nodeOptions, ...environment } = process.env;
+    const stdio = Array.from(
+      { length: req.channelFileDescriptor + 1 },
+      (_value, descriptor): "ignore" | "pipe" => (
+        descriptor === 0
+        || descriptor === 2
+        || descriptor === req.channelFileDescriptor
+          ? "pipe"
+          : "ignore"
+      ),
+    );
 
     const child = spawn(this.#nodePath, ["--input-type=module"], {
-      env: {
-        ...environment,
-        [nodeChannelFdEnvironmentVariable]: String(nodeChannelFd),
-      },
-      stdio: ["pipe", "ignore", "pipe", "pipe"],
+      env: environment,
+      stdio,
     });
 
-    const fd3 = child.stdio[3];
-    assertChannelStream(fd3);
+    const channelStream = child.stdio[req.channelFileDescriptor];
+    assertChannelStream(channelStream, req.channelFileDescriptor);
     const stdin = child.stdin;
     if (stdin === null) {
       child.kill("SIGTERM");
@@ -66,9 +77,26 @@ export class HostNodeRuntime implements Runtime {
     }
 
     const channel: ByteChannel = {
-      incoming: readableChunks(fd3),
-      outgoing: new NodeWritableByteWriter(fd3),
+      incoming: readableChunks(channelStream),
+      outgoing: new NodeWritableByteWriter(channelStream),
     };
+    const launched = new Promise<void>((resolve, reject) => {
+      const cleanup = (): void => {
+        child.off("error", onError);
+        child.off("spawn", onSpawn);
+      };
+      const onError = (error: Error): void => {
+        cleanup();
+        reject(error);
+      };
+      const onSpawn = (): void => {
+        cleanup();
+        resolve();
+      };
+
+      child.once("error", onError);
+      child.once("spawn", onSpawn);
+    });
 
     let stderr = "";
     stderrStream.setEncoding("utf8");
@@ -137,9 +165,10 @@ export class HostNodeRuntime implements Runtime {
     });
 
     try {
+      await launched;
       const bootstrapWriter = new NodeWritableByteWriter(stdin);
       await bootstrapWriter.write(
-        Buffer.from(createNodeBootstrapSource(req.program), "utf8"),
+        Buffer.from(req.bootstrapSource, "utf8"),
       );
       await bootstrapWriter.close();
     } catch (error) {
@@ -149,6 +178,12 @@ export class HostNodeRuntime implements Runtime {
         throw req.signal.reason;
       }
       throw error;
+    }
+
+    if (req.signal.aborted) {
+      requestTermination();
+      await finished;
+      throw req.signal.reason;
     }
 
     return {
@@ -161,20 +196,6 @@ export class HostNodeRuntime implements Runtime {
       },
     };
   }
-}
-
-async function assertHostNode24(
-  nodePath: string,
-  signal: AbortSignal,
-): Promise<void> {
-  signal.throwIfAborted();
-  if (validatedNode24Paths.has(nodePath)) {
-    return;
-  }
-
-  const version = await readHostNodeVersion(nodePath, signal);
-  assertNode24Version(version, `Host Node.js runtime binary ${nodePath}`);
-  validatedNode24Paths.add(nodePath);
 }
 
 function readHostNodeVersion(
@@ -228,7 +249,10 @@ async function* readableChunks(readable: Readable): AsyncIterable<Uint8Array> {
   }
 }
 
-function assertChannelStream(value: unknown): asserts value is Duplex {
+function assertChannelStream(
+  value: unknown,
+  descriptor: number,
+): asserts value is Duplex {
   if (
     value === null ||
     typeof value !== "object" ||
@@ -236,7 +260,7 @@ function assertChannelStream(value: unknown): asserts value is Duplex {
     typeof (value as Writable).end !== "function" ||
     typeof (value as Readable)[Symbol.asyncIterator] !== "function"
   ) {
-    throw new Error("Host Node.js runtime did not create fd 3");
+    throw new Error(`Host Node.js runtime did not create fd ${descriptor}`);
   }
 }
 

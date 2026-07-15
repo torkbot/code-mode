@@ -14,8 +14,9 @@ self-contained JavaScript module, and provides a bidirectional byte channel.
 npm install @torkbot/code-mode
 ```
 
-The host library requires Node.js 24 or newer. The first execution adapters
-target Node.js 24 on the host and inside `@torkbot/sandbox`.
+The host library requires Node.js 24 or newer. `HostNodeRuntime` is the built-in
+execution adapter; other packages can implement the same runtime contract for
+isolates, microVMs, remote sandboxes, or other JavaScript targets.
 
 ## Quick Start
 
@@ -193,7 +194,8 @@ execution.
 
 ## Runtime Contract
 
-Runtime authors import `Runtime` from `@torkbot/code-mode`:
+Runtime authors import the complete author surface from
+`@torkbot/code-mode/runtime`:
 
 ```ts
 interface Runtime {
@@ -202,7 +204,8 @@ interface Runtime {
     signal: AbortSignal,
   ): Promise<readonly TypeDefinitionFile[]>;
   start(request: {
-    readonly program: {
+    readonly payload: {
+      readonly kind: "javascript-module";
       readonly source: string;
     };
     readonly signal: AbortSignal;
@@ -232,20 +235,58 @@ interface ByteChannel {
 }
 ```
 
-The program is self-contained ESM and exports:
+The payload contains all code-mode support code and the submitted agent program.
+It is a self-contained ECMAScript module with this entrypoint:
 
 ```ts
 export function startProgram(channel: ByteChannel): Promise<void>;
 ```
 
 The description is opaque to code mode. The type definition files describe the
-ambient APIs available to checked programs. The adapter evaluates the module,
-invokes `startProgram(channel)`, and reports lifecycle completion. It does not
-receive tool definitions, decode protocol messages, inject globals, or write
-generated files unless its own substrate requires that as an implementation
-detail.
+ambient APIs available to checked programs. Agent-authored dynamic imports use
+the target environment's normal module resolution.
+
+`start()` evaluates the payload as a module and invokes `startProgram()` exactly
+once with the runtime endpoint of a byte channel. The returned instance exposes
+the host endpoint: writes to either endpoint's `outgoing` writer arrive in order
+on its peer's `incoming` iterable. How those endpoints are connected is entirely
+the runtime's decision: in-memory queues, streams, ports, sockets, RPC, and
+process pipes are all valid implementations of the same logical channel.
+
+`start()` resolves only after the payload is launched and the host endpoint is
+ready. Setup failures reject after partial execution is stopped. After launch,
+`finished` always resolves: `closed` means normal completion or requested
+termination; `failed` carries an unexpected runtime failure. `terminate()` is
+idempotent and resolves after `finished`. Aborting the start signal must stop a
+launched execution promptly.
+
+The contract does not contain commands, paths, files, descriptors, environment
+variables, process APIs, or vendor objects. A runtime may use any of them
+internally, but code mode neither supplies nor observes those mechanics.
 
 ## Node Adapters
+
+`@torkbot/code-mode/node` provides `Node24Runtime`. It owns the Node.js 24
+checker declarations, target-version check, and bootstrap that adapts the
+runtime payload to Node. Its required `Node24RuntimeHost` owns the actual
+execution substrate:
+
+```ts
+interface Node24RuntimeHost {
+  readNodeVersion(signal: AbortSignal): Promise<string>;
+  launchNode(request: {
+    readonly bootstrapSource: string;
+    readonly channelFileDescriptor: number;
+    readonly signal: AbortSignal;
+  }): Promise<RuntimeInstance>;
+}
+```
+
+`launchNode()` evaluates the supplied source as the Node entrypoint, connects
+the requested full-duplex descriptor, and returns its peer plus lifecycle. It
+owns source delivery, cwd, process creation, termination, and errors.
+This is a Node adapter boundary, not part of the substrate-neutral `Runtime`
+contract.
 
 ### Host Node.js
 
@@ -259,25 +300,20 @@ file URL rooted at the child working directory, so bare dynamic imports use
 normal Node.js package resolution. The byte channel uses fd 3. The runtime
 supplies the bundled Node.js 24 declarations to the checker.
 
-### Sandbox Node.js
+Sandbox-specific Node launching is deliberately not implemented here.
+`@torkbot/code-mode-sandbox` owns the `@torkbot/sandbox` host implementation,
+including VM lifecycle, spawn options, pipes, cwd, and Sandbox errors, while
+reusing `Node24Runtime` for the Node-owned behavior.
 
-```ts
-import { SandboxNodeRuntime } from "@torkbot/code-mode/sandbox-node";
+## Other JavaScript Runtimes
 
-const runtime = new SandboxNodeRuntime({
-  sandbox,
-  nodePath: "/usr/bin/node",
-  cwd: "/workspace",
-});
-```
-
-The sandbox host must support streaming spawn with caller-selected full-duplex
-descriptors. The adapter requests fd 3, streams a self-contained bootstrap over
-stdin, and uses fd 3 exclusively for code-mode traffic. The generated module is
-anchored at `cwd` for package resolution without writing a runtime file.
-`nodePath` must identify Node.js 24 and is checked inside the sandbox before type
-loading or execution. The runtime supplies the bundled Node.js 24 declarations
-to the checker.
+The payload is an ECMAScript module contract, not a Node process ABI. Deno and
+Bun adapters can evaluate the same payload with target-specific declarations
+and channel bridges. A Worker or serverless adapter can wrap or upload the
+module and connect its endpoint through streams, ports, or provider RPC. A
+platform that cannot launch supplied module code, provide the bidirectional
+channel, or honor termination does not satisfy `Runtime`; the contract does not
+invent a weaker fallback for it.
 
 ## Runtime Conformance
 

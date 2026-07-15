@@ -1,9 +1,8 @@
-import type { Program } from "../core/runtime.ts";
+import type { RuntimePayload } from "../core/runtime.ts";
 
-export const nodeChannelFd = 3;
-export const nodeChannelFdEnvironmentVariable = "CODE_MODE_CHANNEL_FD";
+export const nodeChannelFileDescriptor = 3;
 
-export function createNodeBootstrapSource(program: Program): string {
+export function createNodeBootstrapSource(payload: RuntimePayload): string {
   return `
 import { once } from "node:events";
 import { createReadStream, createWriteStream } from "node:fs";
@@ -11,11 +10,7 @@ import { registerHooks } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-const channelFd = Number(process.env[${JSON.stringify(nodeChannelFdEnvironmentVariable)}]);
-
-if (!Number.isInteger(channelFd)) {
-  throw new Error("${nodeChannelFdEnvironmentVariable} must be an integer file descriptor");
-}
+const channelFd = ${nodeChannelFileDescriptor};
 
 const input = createReadStream(null, {
   fd: channelFd,
@@ -27,7 +22,7 @@ const output = createWriteStream(null, {
 });
 
 const programUrl = pathToFileURL(
-  resolve(process.cwd(), ".code-mode-runtime-program.mjs"),
+  resolve(process.cwd(), ".code-mode-runtime-payload.mjs"),
 ).href;
 const hooks = registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -44,7 +39,7 @@ const hooks = registerHooks({
       return {
         format: "module",
         shortCircuit: true,
-        source: ${JSON.stringify(program.source)},
+        source: ${JSON.stringify(payload.source)},
       };
     }
     return nextLoad(url, context);

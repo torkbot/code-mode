@@ -76,7 +76,7 @@ async function executeInner(
   }
 
   const instance = await req.runtime.start({
-    program,
+    payload: program,
     signal: req.signal,
   });
   const toolCancellation = new AbortController();
