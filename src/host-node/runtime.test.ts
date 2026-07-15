@@ -221,6 +221,34 @@ test("host-node cancellation settles a pending fd 3 read", async () => {
   assert.ok(Date.now() - startedAt < 2_000);
 });
 
+test("host-node host readable cancellation preserves channel writes", async () => {
+  const startedAt = Date.now();
+  const runtime = await createHostNodeRuntime();
+  const instance = await runtime.start({
+    payload: {
+      kind: "javascript-module",
+      source: `export async function startProgram(channel) {
+        const reader = channel.readable.getReader();
+        const result = await reader.read();
+        if (result.done || result.value[0] !== 42) {
+          throw new Error("host write did not reach the payload");
+        }
+        const writer = channel.writable.getWriter();
+        await writer.close();
+      }`,
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  await instance.channel.readable.cancel();
+  const writer = instance.channel.writable.getWriter();
+  await writer.write(new Uint8Array([42]));
+  await writer.close();
+
+  assert.deepEqual(await instance.finished, { kind: "closed" });
+  assert.ok(Date.now() - startedAt < 2_000);
+});
+
 test("host-node rejects binaries outside its Node 24 target", async () => {
   const runtime = new HostNodeRuntime("/bin/echo");
 
