@@ -118,7 +118,8 @@ test("host-node streams programs larger than process argument limits", async () 
       kind: "javascript-module",
       source: [
         "export async function startProgram(channel) {",
-        "  await channel.outgoing.close();",
+        "  const writer = channel.writable.getWriter();",
+        "  await writer.close();",
         "}",
         `/* ${"x".repeat(900_000)} */`,
       ].join("\n"),
@@ -126,7 +127,7 @@ test("host-node streams programs larger than process argument limits", async () 
     signal: AbortSignal.timeout(10_000),
   });
 
-  for await (const _chunk of instance.channel.incoming) {
+  for await (const _chunk of instance.channel.readable) {
     // Drain the child channel until the program exits.
   }
 
@@ -139,7 +140,8 @@ test("host-node bounds stderr retained for process failures", async () => {
     payload: {
       kind: "javascript-module",
       source: `export async function startProgram(channel) {
-        await channel.outgoing.close();
+        const writer = channel.writable.getWriter();
+        await writer.close();
         process.stderr.write("x".repeat(100_000) + "stderr sentinel");
         process.exitCode = 7;
       }`,
@@ -147,7 +149,7 @@ test("host-node bounds stderr retained for process failures", async () => {
     signal: AbortSignal.timeout(10_000),
   });
 
-  for await (const _chunk of instance.channel.incoming) {
+  for await (const _chunk of instance.channel.readable) {
     // Drain the child channel until the program exits.
   }
 

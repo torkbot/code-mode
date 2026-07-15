@@ -1,12 +1,7 @@
 import { execFile, spawn } from "node:child_process";
-import type { Duplex, Readable, Writable } from "node:stream";
+import { Duplex, Writable } from "node:stream";
 
-import type {
-  ByteChannel,
-  ByteWriter,
-  RuntimeFinished,
-  RuntimeInstance,
-} from "../core/runtime.ts";
+import type { RuntimeFinished, RuntimeInstance } from "../core/runtime.ts";
 import {
   Node24Runtime,
   type Node24RuntimeHost,
@@ -76,10 +71,7 @@ class HostNodeRuntimeHost implements Node24RuntimeHost {
       throw new Error("Host Node.js runtime did not create stderr");
     }
 
-    const channel: ByteChannel = {
-      incoming: readableChunks(channelStream),
-      outgoing: new NodeWritableByteWriter(channelStream),
-    };
+    const channel = Duplex.toWeb(channelStream);
     const launched = new Promise<void>((resolve, reject) => {
       const cleanup = (): void => {
         child.off("error", onError);
@@ -166,7 +158,7 @@ class HostNodeRuntimeHost implements Node24RuntimeHost {
 
     try {
       await launched;
-      const bootstrapWriter = new NodeWritableByteWriter(stdin);
+      const bootstrapWriter = Writable.toWeb(stdin).getWriter();
       await bootstrapWriter.write(
         Buffer.from(req.bootstrapSource, "utf8"),
       );
@@ -233,22 +225,6 @@ function appendTextTail(current: string, chunk: string): string {
     : `${current}${chunk}`;
 }
 
-async function* readableChunks(readable: Readable): AsyncIterable<Uint8Array> {
-  for await (const chunk of readable) {
-    if (chunk instanceof Uint8Array) {
-      yield chunk;
-      continue;
-    }
-
-    if (typeof chunk === "string") {
-      yield Buffer.from(chunk);
-      continue;
-    }
-
-    throw new Error("Host Node.js runtime emitted an unsupported channel chunk");
-  }
-}
-
 function assertChannelStream(
   value: unknown,
   descriptor: number,
@@ -256,9 +232,9 @@ function assertChannelStream(
   if (
     value === null ||
     typeof value !== "object" ||
-    typeof (value as Writable).write !== "function" ||
-    typeof (value as Writable).end !== "function" ||
-    typeof (value as Readable)[Symbol.asyncIterator] !== "function"
+    typeof (value as Duplex).write !== "function" ||
+    typeof (value as Duplex).end !== "function" ||
+    typeof (value as Duplex)[Symbol.asyncIterator] !== "function"
   ) {
     throw new Error(`Host Node.js runtime did not create fd ${descriptor}`);
   }
@@ -277,74 +253,4 @@ function formatChildFailure(
   }
 
   return `${status}: ${detail}`;
-}
-
-class NodeWritableByteWriter implements ByteWriter {
-  readonly #writable: Writable;
-  #writeError: Error | undefined;
-
-  constructor(writable: Writable) {
-    this.#writable = writable;
-    this.#writable.on("error", (error: Error) => {
-      this.#writeError ??= error;
-    });
-  }
-
-  async write(chunk: Uint8Array): Promise<void> {
-    if (this.#writeError !== undefined) {
-      throw this.#writeError;
-    }
-    if (this.#writable.destroyed || this.#writable.writableEnded) {
-      throw new Error("Host Node.js runtime channel is closed");
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const onClose = (): void => {
-        cleanup();
-        reject(
-          this.#writeError
-          ?? new Error("Host Node.js runtime channel closed during a write"),
-        );
-      };
-      const onWrite = (error?: Error | null): void => {
-        cleanup();
-        if (error === null || error === undefined) {
-          resolve();
-          return;
-        }
-        reject(error);
-      };
-      const cleanup = (): void => {
-        this.#writable.off("close", onClose);
-      };
-
-      this.#writable.once("close", onClose);
-      this.#writable.write(chunk, onWrite);
-    });
-  }
-
-  async close(): Promise<void> {
-    if (this.#writable.destroyed || this.#writable.writableEnded) {
-      return;
-    }
-
-    await new Promise<void>((resolve, reject) => {
-      const onError = (error: Error): void => {
-        cleanup();
-        reject(error);
-      };
-      const onFinish = (): void => {
-        cleanup();
-        resolve();
-      };
-      const cleanup = (): void => {
-        this.#writable.off("error", onError);
-        this.#writable.off("finish", onFinish);
-      };
-
-      this.#writable.once("error", onError);
-      this.#writable.once("finish", onFinish);
-      this.#writable.end();
-    });
-  }
 }

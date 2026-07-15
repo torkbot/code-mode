@@ -36,8 +36,8 @@ export interface Runtime {
    *
    * The payload receives one endpoint of a bidirectional byte channel through
    * startProgram(channel). The returned instance exposes the other endpoint:
-   * bytes written to either endpoint's outgoing writer must arrive, in order,
-   * from the peer endpoint's incoming iterable.
+   * bytes written to either endpoint's writable stream must arrive, in order,
+   * from the peer endpoint's readable stream.
    *
    * This promise resolves when the payload has been launched and the returned
    * channel is ready for I/O. Launch failures reject after any partial runtime
@@ -54,7 +54,10 @@ export interface TypeDefinitionFile {
 
 export interface RuntimeInstance {
   /** The host endpoint paired with the channel passed to startProgram(). */
-  readonly channel: ByteChannel;
+  readonly channel: {
+    readonly readable: ReadableStream<Uint8Array>;
+    readonly writable: WritableStream<Uint8Array>;
+  };
   /**
    * Resolves exactly once after the execution environment can no longer
    * exchange bytes. Runtime failures are values; this promise does not reject.
@@ -65,21 +68,6 @@ export interface RuntimeInstance {
    * idempotent; reason is diagnostic context for the runtime implementation.
    */
   terminate(reason: string): Promise<void>;
-}
-
-export interface ByteChannel {
-  readonly incoming: AsyncIterable<Uint8Array>;
-  readonly outgoing: ByteWriter;
-}
-
-export interface ByteWriter {
-  /** Delivers one chunk to the peer endpoint without mutating it. */
-  write(chunk: Uint8Array): Promise<void>;
-  /**
-   * Flushes prior writes and ends the peer endpoint's incoming iterable.
-   * Repeated calls are idempotent.
-   */
-  close(): Promise<void>;
 }
 
 export type RuntimeFinished =

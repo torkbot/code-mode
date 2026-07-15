@@ -4,21 +4,19 @@ export const nodeChannelFileDescriptor = 3;
 
 export function createNodeBootstrapSource(payload: RuntimePayload): string {
   return `
-import { once } from "node:events";
-import { createReadStream, createWriteStream } from "node:fs";
 import { registerHooks } from "node:module";
+import { Socket } from "node:net";
 import { resolve } from "node:path";
+import { Duplex } from "node:stream";
 import { pathToFileURL } from "node:url";
 
 const channelFd = ${nodeChannelFileDescriptor};
 
-const input = createReadStream(null, {
+const channel = new Socket({
   fd: channelFd,
-  autoClose: false,
-});
-const output = createWriteStream(null, {
-  fd: channelFd,
-  autoClose: false,
+  readable: true,
+  writable: true,
+  allowHalfOpen: true,
 });
 
 const programUrl = pathToFileURL(
@@ -57,55 +55,10 @@ if (typeof start !== "function") {
   throw new Error("Code-mode source program must export startProgram()");
 }
 
-await start({
-  incoming: readableChunks(input),
-  outgoing: {
-    async write(chunk) {
-      if (output.destroyed || output.writableEnded) {
-        throw new Error("Code-mode byte channel is closed");
-      }
-      if (!output.write(chunk)) {
-        await once(output, "drain");
-      }
-    },
-    async close() {
-      await closeWritable(output);
-    },
-  },
-});
-
-async function closeWritable(writable) {
-  if (writable.destroyed || writable.writableEnded) {
-    return;
-  }
-
-  await new Promise((resolve, reject) => {
-    const cleanup = () => {
-      writable.off("error", onError);
-      writable.off("finish", onFinish);
-    };
-    const onError = (error) => {
-      cleanup();
-      reject(error);
-    };
-    const onFinish = () => {
-      cleanup();
-      resolve();
-    };
-
-    writable.once("error", onError);
-    writable.once("finish", onFinish);
-    writable.end();
-  });
-}
-
-async function* readableChunks(readable) {
-  for await (const chunk of readable) {
-    if (!(chunk instanceof Uint8Array)) {
-      throw new Error("Code-mode byte channel emitted an unsupported chunk");
-    }
-    yield chunk;
-  }
+try {
+  await start(Duplex.toWeb(channel));
+} finally {
+  channel.destroy();
 }
 `;
 }

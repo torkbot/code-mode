@@ -218,7 +218,10 @@ interface TypeDefinitionFile {
 }
 
 interface RuntimeInstance {
-  readonly channel: ByteChannel;
+  readonly channel: {
+    readonly readable: ReadableStream<Uint8Array>;
+    readonly writable: WritableStream<Uint8Array>;
+  };
   readonly finished: Promise<
     | { readonly kind: "closed" }
     | { readonly kind: "failed"; readonly error: Error }
@@ -226,20 +229,16 @@ interface RuntimeInstance {
   terminate(reason: string): Promise<void>;
 }
 
-interface ByteChannel {
-  readonly incoming: AsyncIterable<Uint8Array>;
-  readonly outgoing: {
-    write(chunk: Uint8Array): Promise<void>;
-    close(): Promise<void>;
-  };
-}
 ```
 
 The payload contains all code-mode support code and the submitted agent program.
 It is a self-contained ECMAScript module with this entrypoint:
 
 ```ts
-export function startProgram(channel: ByteChannel): Promise<void>;
+export function startProgram(channel: {
+  readonly readable: ReadableStream<Uint8Array>;
+  readonly writable: WritableStream<Uint8Array>;
+}): Promise<void>;
 ```
 
 The description is opaque to code mode. The type definition files describe the
@@ -248,10 +247,12 @@ the target environment's normal module resolution.
 
 `start()` evaluates the payload as a module and invokes `startProgram()` exactly
 once with the runtime endpoint of a byte channel. The returned instance exposes
-the host endpoint: writes to either endpoint's `outgoing` writer arrive in order
-on its peer's `incoming` iterable. How those endpoints are connected is entirely
-the runtime's decision: in-memory queues, streams, ports, sockets, RPC, and
-process pipes are all valid implementations of the same logical channel.
+the host endpoint: writes to either endpoint's `writable` stream arrive in order
+on its peer's `readable` stream. Code mode acquires and closes each writer; a
+runtime substrate only supplies standard Web Streams. How those endpoints are
+connected is entirely the runtime's decision: in-memory queues, streams, ports,
+sockets, RPC, and process pipes are all valid implementations of the same
+logical channel.
 
 `start()` resolves only after the payload is launched and the host endpoint is
 ready. Setup failures reject after partial execution is stopped. After launch,

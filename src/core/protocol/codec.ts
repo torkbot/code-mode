@@ -25,24 +25,24 @@ export function encodeProgramMessage(message: ProgramMessage): Uint8Array {
 }
 
 export async function writeHostMessage(
-  outgoing: { write(chunk: Uint8Array): Promise<void> },
+  writer: WritableStreamDefaultWriter<Uint8Array>,
   message: HostMessage,
 ): Promise<void> {
-  await outgoing.write(encodeHostMessage(message));
+  await writer.write(encodeHostMessage(message));
 }
 
 export async function* readProgramMessages(
-  incoming: AsyncIterable<Uint8Array>,
+  readable: ReadableStream<Uint8Array>,
 ): AsyncIterable<ProgramMessage> {
-  for await (const document of readBsonFrames(incoming)) {
+  for await (const document of readBsonFrames(readable)) {
     yield parseProgramMessage(document);
   }
 }
 
 export async function* readHostMessages(
-  incoming: AsyncIterable<Uint8Array>,
+  readable: ReadableStream<Uint8Array>,
 ): AsyncIterable<HostMessage> {
-  for await (const document of readBsonFrames(incoming)) {
+  for await (const document of readBsonFrames(readable)) {
     yield parseHostMessage(document);
   }
 }
@@ -69,13 +69,13 @@ function encodeBsonFrame(document: Record<string, unknown>): Uint8Array {
 }
 
 async function* readBsonFrames(
-  incoming: AsyncIterable<Uint8Array>,
+  readable: ReadableStream<Uint8Array>,
 ): AsyncIterable<Record<string, unknown>> {
   const header = new Uint8Array(bsonFrameHeaderLength);
   let headerLength = 0;
   let frame: FrameState | undefined;
 
-  for await (const chunk of incoming) {
+  for await (const chunk of readable) {
     let offset = 0;
 
     while (offset < chunk.byteLength) {

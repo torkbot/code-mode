@@ -8,7 +8,6 @@ import {
 } from "./program.ts";
 import { maximumBsonFrameLength, readProgramMessages } from "./protocol/codec.ts";
 import type {
-  ByteChannel,
   Runtime,
   RuntimeFinished,
   RuntimeInstance,
@@ -25,16 +24,16 @@ test("a supplied runtime receives a generated JavaScript module payload and expo
   let outgoingClosed = false;
   let terminationReason: string | undefined;
 
-  const channel: ByteChannel = {
-    incoming: singleChunk(encoder.encode("from-runtime")),
-    outgoing: {
+  const channel: RuntimeInstance["channel"] = {
+    readable: singleChunk(encoder.encode("from-runtime")),
+    writable: new WritableStream({
       async write(chunk) {
         observedWrites.push(chunk);
       },
       async close() {
         outgoingClosed = true;
       },
-    },
+    }),
   };
 
   const finished: RuntimeFinished = { kind: "closed" };
@@ -79,22 +78,23 @@ test("a supplied runtime receives a generated JavaScript module payload and expo
     observedPayload?.source ?? "",
     /function __createCodeModeAgentProgram\(console, globalThis, global, Promise\)/,
   );
-  assert.match(observedPayload?.source ?? "", /readBsonFrames\(channel\.incoming\)/);
-  assert.match(observedPayload?.source ?? "", /channel\.outgoing\.write/);
+  assert.match(observedPayload?.source ?? "", /readBsonFrames\(channel\.readable\)/);
+  assert.match(observedPayload?.source ?? "", /channel\.writable\.getWriter/);
   assert.match(observedPayload?.source ?? "", /kind: "program-log"/);
   assert.match(observedPayload?.source ?? "", /codemode: new Proxy/);
   assert.match(observedPayload?.source ?? "", /async \(\) => \(\{ value: 42 \}\)/);
   assert.match(observedPayload?.source ?? "", /await run\(scope\)/);
 
   const chunks: Uint8Array[] = [];
-  for await (const chunk of instance.channel.incoming) {
+  for await (const chunk of instance.channel.readable) {
     chunks.push(chunk);
   }
 
   assert.equal(decoder.decode(Buffer.concat(chunks)), "from-runtime");
 
-  await instance.channel.outgoing.write(encoder.encode("to-runtime"));
-  await instance.channel.outgoing.close();
+  const writer = instance.channel.writable.getWriter();
+  await writer.write(encoder.encode("to-runtime"));
+  await writer.close();
   await instance.terminate("test complete");
 
   assert.equal(decoder.decode(Buffer.concat(observedWrites)), "to-runtime");
@@ -115,8 +115,8 @@ test("createProgram returns a self-contained module", () => {
   assert.match(program.source, /Bundled from flatted/);
   assert.match(program.source, /flattedStringify/);
   assert.match(program.source, /function __createCodeModeAgentProgram\(console, globalThis, global, Promise\)/);
-  assert.match(program.source, /readBsonFrames\(channel\.incoming\)/);
-  assert.match(program.source, /channel\.outgoing\.write/);
+  assert.match(program.source, /readBsonFrames\(channel\.readable\)/);
+  assert.match(program.source, /channel\.writable\.getWriter/);
   assert.match(program.source, /kind: "program-log"/);
   assert.match(program.source, /codemode: new Proxy/);
   assert.match(program.source, /async \(\) => \(\{ message: 'hello from code-mode' \}\)/);
@@ -140,21 +140,21 @@ test("generated programs reject oversized host frames before reading a payload",
   const program = createProgram("async ({ codemode }) => { await codemode.wait({}); }");
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
   const runtimeProgram = await import(moduleUrl) as {
-    startProgram(channel: ByteChannel): Promise<void>;
+    startProgram(channel: RuntimeInstance["channel"]): Promise<void>;
   };
   const writes: Uint8Array[] = [];
   let outgoingClosed = false;
 
   await runtimeProgram.startProgram({
-    incoming: singleChunk(encodeFrameLength(maximumBsonFrameLength + 1)),
-    outgoing: {
+    readable: singleChunk(encodeFrameLength(maximumBsonFrameLength + 1)),
+    writable: new WritableStream({
       async write(chunk) {
         writes.push(chunk);
       },
       async close() {
         outgoingClosed = true;
       },
-    },
+    }),
   });
 
   const messages = [];
@@ -177,18 +177,18 @@ test("generated programs bound oversized errors into a program outcome", async (
   );
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
   const runtimeProgram = await import(moduleUrl) as {
-    startProgram(channel: ByteChannel): Promise<void>;
+    startProgram(channel: RuntimeInstance["channel"]): Promise<void>;
   };
   const writes: Uint8Array[] = [];
 
   await runtimeProgram.startProgram({
-    incoming: manyChunks([]),
-    outgoing: {
+    readable: manyChunks([]),
+    writable: new WritableStream({
       async write(chunk) {
         writes.push(chunk);
       },
       async close() {},
-    },
+    }),
   });
 
   const messages = [];
@@ -199,6 +199,47 @@ test("generated programs bound oversized errors into a program outcome", async (
   assert.equal(failure?.kind, "program-error");
   assert.equal(failure.error.message.length, maximumTelemetryErrorMessageLength);
   assert.match(failure.error.message, /<truncated>$/);
+});
+
+test("generated programs close after failing with a pending response read", async () => {
+  const program = createProgram(
+    `async ({ codemode }) => {
+      void codemode.wait({});
+      throw new Error("agent failed");
+    }`,
+  );
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
+  const runtimeProgram = await import(moduleUrl) as {
+    startProgram(channel: RuntimeInstance["channel"]): Promise<void>;
+  };
+  const writes: Uint8Array[] = [];
+  let closed = false;
+
+  await runtimeProgram.startProgram({
+    readable: new ReadableStream({
+      async pull() {
+        await new Promise<never>(() => {});
+      },
+    }),
+    writable: new WritableStream({
+      write(chunk) {
+        writes.push(chunk);
+      },
+      close() {
+        closed = true;
+      },
+    }),
+  });
+
+  const messages = [];
+  for await (const message of readProgramMessages(manyChunks(writes))) {
+    messages.push(message);
+  }
+  assert.deepEqual(messages.map((message) => message.kind), [
+    "tool-call",
+    "program-error",
+  ]);
+  assert.equal(closed, true);
 });
 
 test("public core source does not expose Node-specific contracts", async () => {
@@ -219,12 +260,19 @@ test("public core source does not expose Node-specific contracts", async () => {
   }
 });
 
-async function* singleChunk(chunk: Uint8Array): AsyncIterable<Uint8Array> {
-  yield chunk;
+function singleChunk(chunk: Uint8Array): ReadableStream<Uint8Array> {
+  return manyChunks([chunk]);
 }
 
-async function* manyChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
-  yield* chunks;
+function manyChunks(chunks: readonly Uint8Array[]): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
 }
 
 function encodeFrameLength(frameLength: number): Uint8Array {

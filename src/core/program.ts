@@ -106,7 +106,8 @@ function createFlattedStringify() {
 
 export async function startProgram(channel) {
   let nextToolCallId = 0;
-  const responses = readBsonFrames(channel.incoming)[Symbol.asyncIterator]();
+  const responses = readBsonFrames(channel.readable)[Symbol.asyncIterator]();
+  const outgoing = channel.writable.getWriter();
   const pendingToolCalls = new Map();
   const unobservedToolCalls = new Map();
   const trackedToolPromises = new WeakSet();
@@ -188,14 +189,14 @@ export async function startProgram(channel) {
       kind: "completed",
     });
     await writeQueue;
-    await channel.outgoing.close();
+    await outgoing.close();
   } catch (error) {
     await enqueueProgramMessage({
       kind: "program-error",
       error: serializeError(error),
     });
     await writeQueue.catch(() => {});
-    await channel.outgoing.close();
+    await outgoing.close();
   }
 
   function waitForToolResponse(id, name) {
@@ -335,7 +336,7 @@ export async function startProgram(channel) {
 
   function enqueueProgramMessage(message) {
     const write = writeQueue.then(async () => {
-      await channel.outgoing.write(encodeBsonFrame(message));
+      await outgoing.write(encodeBsonFrame(message));
     });
     writeQueue = write.catch(() => {});
     return write;

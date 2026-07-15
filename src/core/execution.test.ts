@@ -40,11 +40,11 @@ test("execution terminates a live runtime when protocol processing fails", async
     async start() {
       return {
         channel: {
-          incoming: fromChunks([validToolCall, malformedMessage]),
-          outgoing: {
+          readable: readableFromChunks([validToolCall, malformedMessage]),
+          writable: new WritableStream({
             async write() {},
             async close() {},
-          },
+          }),
         },
         finished,
         async terminate(reason) {
@@ -128,19 +128,22 @@ test("a terminal program error does not wait for a non-cooperative tool call", a
     async start() {
       return {
         channel: {
-          incoming: (async function* () {
-            yield toolCall;
-            await toolStarted;
-            yield programError;
-          })(),
-          outgoing: {
+          readable: new ReadableStream({
+            async start(controller) {
+              controller.enqueue(toolCall);
+              await toolStarted;
+              controller.enqueue(programError);
+              controller.close();
+            },
+          }),
+          writable: new WritableStream({
             async write() {
               throw new Error("runtime channel is closed");
             },
             async close() {
               throw new Error("runtime channel is already closed");
             },
-          },
+          }),
         },
         finished,
         async terminate() {
@@ -194,11 +197,11 @@ test("execution terminates a runtime after a completed protocol message", async 
     async start() {
       return {
         channel: {
-          incoming: fromChunks([encodeProgramMessage({ kind: "completed" })]),
-          outgoing: {
+          readable: readableFromChunks([encodeProgramMessage({ kind: "completed" })]),
+          writable: new WritableStream({
             async write() {},
             async close() {},
-          },
+          }),
         },
         finished,
         async terminate(reason) {
@@ -236,16 +239,18 @@ test("failed tool response writes reject without completion telemetry", async ()
     async start() {
       return {
         channel: {
-          incoming: (async function* () {
-            yield toolCall;
-            await new Promise<never>(() => {});
-          })(),
-          outgoing: {
+          readable: new ReadableStream({
+            async start(controller) {
+              controller.enqueue(toolCall);
+              await new Promise<never>(() => {});
+            },
+          }),
+          writable: new WritableStream({
             async write() {
               throw new Error("runtime channel is closed");
             },
             async close() {},
-          },
+          }),
         },
         finished,
         async terminate() {
@@ -310,13 +315,13 @@ test("execution rejects completion while a tool call is pending", async () => {
     async start() {
       return {
         channel: {
-          incoming: fromChunks([toolCall, completed]),
-          outgoing: {
+          readable: readableFromChunks([toolCall, completed]),
+          writable: new WritableStream({
             async write() {
               return await new Promise<never>(() => {});
             },
             async close() {},
-          },
+          }),
         },
         finished,
         async terminate() {
@@ -345,11 +350,11 @@ test("execution honors cancellation that occurs while the runtime starts", async
       controller.abort(new Error("cancel during runtime start"));
       return {
         channel: {
-          incoming: fromChunks([]),
-          outgoing: {
+          readable: readableFromChunks([]),
+          writable: new WritableStream({
             async write() {},
             async close() {},
-          },
+          }),
         },
         finished: Promise.resolve({ kind: "closed" }),
         async terminate() {
@@ -378,10 +383,15 @@ function encodeRawBsonFrame(document: Record<string, unknown>): Uint8Array {
   return packet;
 }
 
-async function* fromChunks(chunks: readonly Uint8Array[]): AsyncIterable<Uint8Array> {
-  for (const chunk of chunks) {
-    yield chunk;
-  }
+function readableFromChunks(chunks: readonly Uint8Array[]): ReadableStream<Uint8Array> {
+  return new ReadableStream({
+    start(controller) {
+      for (const chunk of chunks) {
+        controller.enqueue(chunk);
+      }
+      controller.close();
+    },
+  });
 }
 
 const testRuntimeMetadata = {

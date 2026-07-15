@@ -1,6 +1,4 @@
 export type {
-  ByteChannel,
-  ByteWriter,
   Runtime,
   RuntimeFinished,
   RuntimeInstance,
