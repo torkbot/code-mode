@@ -72,7 +72,7 @@ const readable = new ReadableStream({
     controller.enqueue(next.value);
   },
   cancel() {
-    input.destroy();
+    input.pause();
   },
 }, { highWaterMark: 0 });
 const writable = new WritableStream({

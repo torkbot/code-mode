@@ -159,6 +159,37 @@ test("host-node bounds stderr retained for process failures", async () => {
   assert.ok(finished.error.message.length < 66_000);
 });
 
+test("host-node readable cancellation preserves the writable half of fd 3", async () => {
+  const startedAt = Date.now();
+  const runtime = await createHostNodeRuntime();
+  const instance = await runtime.start({
+    payload: {
+      kind: "javascript-module",
+      source: `export async function startProgram(channel) {
+        const reader = channel.readable.getReader();
+        await reader.read();
+        await reader.cancel();
+        const writer = channel.writable.getWriter();
+        await writer.write(new TextEncoder().encode("after cancel"));
+        await writer.close();
+      }`,
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  const writer = instance.channel.writable.getWriter();
+  await writer.write(new Uint8Array([1]));
+  await writer.close();
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of instance.channel.readable) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(Buffer.concat(chunks).toString("utf8"), "after cancel");
+  assert.deepEqual(await instance.finished, { kind: "closed" });
+  assert.ok(Date.now() - startedAt < 2_000);
+});
+
 test("host-node rejects binaries outside its Node 24 target", async () => {
   const runtime = new HostNodeRuntime("/bin/echo");
 

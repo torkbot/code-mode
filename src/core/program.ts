@@ -189,7 +189,6 @@ export async function startProgram(channel) {
       kind: "completed",
     });
     await writeQueue;
-    await responses.return();
     await outgoing.close();
   } catch (error) {
     await enqueueProgramMessage({
@@ -197,7 +196,6 @@ export async function startProgram(channel) {
       error: serializeError(error),
     });
     await writeQueue.catch(() => {});
-    await responses.return();
     await outgoing.close();
   }
 

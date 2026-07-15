@@ -201,6 +201,47 @@ test("generated programs bound oversized errors into a program outcome", async (
   assert.match(failure.error.message, /<truncated>$/);
 });
 
+test("generated programs close after failing with a pending response read", async () => {
+  const program = createProgram(
+    `async ({ codemode }) => {
+      void codemode.wait({});
+      throw new Error("agent failed");
+    }`,
+  );
+  const moduleUrl = `data:text/javascript;base64,${Buffer.from(program.source).toString("base64")}`;
+  const runtimeProgram = await import(moduleUrl) as {
+    startProgram(channel: RuntimeInstance["channel"]): Promise<void>;
+  };
+  const writes: Uint8Array[] = [];
+  let closed = false;
+
+  await runtimeProgram.startProgram({
+    readable: new ReadableStream({
+      async pull() {
+        await new Promise<never>(() => {});
+      },
+    }),
+    writable: new WritableStream({
+      write(chunk) {
+        writes.push(chunk);
+      },
+      close() {
+        closed = true;
+      },
+    }),
+  });
+
+  const messages = [];
+  for await (const message of readProgramMessages(manyChunks(writes))) {
+    messages.push(message);
+  }
+  assert.deepEqual(messages.map((message) => message.kind), [
+    "tool-call",
+    "program-error",
+  ]);
+  assert.equal(closed, true);
+});
+
 test("public core source does not expose Node-specific contracts", async () => {
   const coreFiles = await Promise.all([
     readFile(new URL("../index.ts", import.meta.url), "utf8"),
