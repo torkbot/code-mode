@@ -17,13 +17,17 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/runtime/index.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "default": "./dist/node/index.js"
+    },
     "./host-node": {
       "types": "./dist/host-node/index.d.ts",
       "default": "./dist/host-node/index.js"
-    },
-    "./sandbox-node": {
-      "types": "./dist/sandbox-node/index.d.ts",
-      "default": "./dist/sandbox-node/index.js"
     },
     "./testing": {
       "types": "./dist/testing/index.d.ts",

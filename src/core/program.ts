@@ -1,4 +1,4 @@
-import type { Program } from "./runtime.ts";
+import type { RuntimePayload } from "./runtime.ts";
 import { bsonRuntimeSource } from "../runtime-code/bson.ts";
 import {
   agentProgramFactoryName,
@@ -16,13 +16,14 @@ import {
   maximumTelemetryErrorStackLength,
 } from "./telemetry.ts";
 
-export function createProgram(agentSource: string): Program {
+export function createProgram(agentSource: string): RuntimePayload {
   const transpilation = transpileAgentSource(agentSource);
   if (transpilation.kind === "invalid") {
     throw new AgentSourceSyntaxError(transpilation.report);
   }
 
   return {
+    kind: "javascript-module",
     source: createRuntimeProgramSource(transpilation.source),
   };
 }

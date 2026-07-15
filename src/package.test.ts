@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-test("public root and host-node sub-path exports are declared", async () => {
+test("public runtime, Node adapter, host-node, and testing exports are declared", async () => {
   const packageJson = JSON.parse(
     await readFile(new URL("../package.json", import.meta.url), "utf8"),
   ) as {
@@ -19,16 +19,20 @@ test("public root and host-node sub-path exports are declared", async () => {
     types: "./dist/index.d.ts",
     default: "./dist/index.js",
   });
+  assert.deepEqual(packageJson.exports["./runtime"], {
+    types: "./dist/runtime/index.d.ts",
+    default: "./dist/runtime/index.js",
+  });
+  assert.deepEqual(packageJson.exports["./node"], {
+    types: "./dist/node/index.d.ts",
+    default: "./dist/node/index.js",
+  });
   assert.deepEqual(packageJson.exports["./host-node"], {
     types: "./dist/host-node/index.d.ts",
     default: "./dist/host-node/index.js",
   });
   assert.equal(packageJson.exports["./host-node/node24"], undefined);
-  assert.equal(packageJson.exports["./runtime"], undefined);
-  assert.deepEqual(packageJson.exports["./sandbox-node"], {
-    types: "./dist/sandbox-node/index.d.ts",
-    default: "./dist/sandbox-node/index.js",
-  });
+  assert.equal(packageJson.exports["./sandbox-node"], undefined);
   assert.deepEqual(packageJson.exports["./testing"], {
     types: "./dist/testing/index.d.ts",
     default: "./dist/testing/index.js",
@@ -78,6 +82,47 @@ test("public root export is focused on toolbox and client APIs", async () => {
   assert.doesNotMatch(hostNodeExport, /readNode24TypeDefinitions/);
 });
 
+test("runtime-author and Node adapter exports expose the complete ownership boundary", async () => {
+  const runtimeExport = await readFile(
+    new URL("./runtime/index.ts", import.meta.url),
+    "utf8",
+  );
+  const runtimeContract = await readFile(
+    new URL("./core/runtime.ts", import.meta.url),
+    "utf8",
+  );
+  const nodeAdapter = await readFile(
+    new URL("./node/index.ts", import.meta.url),
+    "utf8",
+  );
+
+  for (const typeName of [
+    "ByteChannel",
+    "ByteWriter",
+    "Runtime",
+    "RuntimeFinished",
+    "RuntimeInstance",
+    "RuntimePayload",
+    "RuntimeStartRequest",
+    "TypeDefinitionFile",
+  ]) {
+    assert.match(runtimeExport, new RegExp(`\\b${typeName}\\b`));
+  }
+
+  assert.match(runtimeContract, /readonly payload: RuntimePayload/);
+  assert.match(runtimeContract, /readonly kind: "javascript-module"/);
+  assert.match(runtimeContract, /startProgram\(channel\)/);
+  assert.match(runtimeContract, /other endpoint/);
+  assert.match(runtimeContract, /Runtime failures are values/);
+  assert.match(runtimeContract, /Calls are\s+\* idempotent/);
+
+  assert.match(nodeAdapter, /class Node24Runtime implements Runtime/);
+  assert.match(nodeAdapter, /interface Node24RuntimeHost/);
+  assert.match(nodeAdapter, /launchNode\(req: Node24RuntimeLaunchRequest\)/);
+  assert.match(nodeAdapter, /createNodeBootstrapSource\(req\.payload\)/);
+  assert.doesNotMatch(nodeAdapter, /node:child_process|@torkbot\/sandbox|Sandbox/);
+});
+
 test("runtime owns its description and checking type definitions", async () => {
   const runtime = await readFile(new URL("./core/runtime.ts", import.meta.url), "utf8");
   const client = await readFile(new URL("./core/client.ts", import.meta.url), "utf8");
@@ -124,19 +169,19 @@ test("runtime build and validation components do not write generated artifacts t
     new URL("./host-node/index.ts", import.meta.url),
     "utf8",
   );
-  const validation = await readFile(
-    new URL("./core/validation/index.ts", import.meta.url),
+  const nodeAdapter = await readFile(
+    new URL("./node/index.ts", import.meta.url),
     "utf8",
   );
-  const sandboxNodeRuntime = await readFile(
-    new URL("./sandbox-node/index.ts", import.meta.url),
+  const validation = await readFile(
+    new URL("./core/validation/index.ts", import.meta.url),
     "utf8",
   );
   const nodeBootstrap = await readFile(
     new URL("./node-runtime/bootstrap.ts", import.meta.url),
     "utf8",
   );
-  const runtimeComponents = `${hostNodeRuntime}\n${sandboxNodeRuntime}\n${nodeBootstrap}\n${validation}`;
+  const runtimeComponents = `${hostNodeRuntime}\n${nodeAdapter}\n${nodeBootstrap}\n${validation}`;
 
   assert.doesNotMatch(runtimeComponents, /node:fs\/promises/);
   assert.doesNotMatch(runtimeComponents, /\bmkdtemp\b/);
@@ -147,8 +192,8 @@ test("runtime build and validation components do not write generated artifacts t
   assert.doesNotMatch(hostNodeRuntime, /--eval/);
   assert.match(hostNodeRuntime, /bootstrapWriter/);
   assert.match(nodeBootstrap, /registerHooks/);
-  assert.match(nodeBootstrap, /\.code-mode-runtime-program\.mjs/);
-  assert.match(sandboxNodeRuntime, /writeAndClose/);
+  assert.match(nodeBootstrap, /\.code-mode-runtime-payload\.mjs/);
+  assert.doesNotMatch(nodeAdapter, /\bspawn\b|node:child_process/);
   assert.match(validation, /new API/);
   assert.match(validation, /createValidationFileSystem/);
 });

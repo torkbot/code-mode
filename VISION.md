@@ -13,11 +13,13 @@ The project serves three roles:
    and live telemetry. Agents repair ordinary type errors and submit one async
    function expression.
 3. **Runtime authors** describe the execution environment, supply its checker
-   declarations, and evaluate a self-contained JavaScript module over a raw
-   bidirectional byte channel. Runtimes own the checking target, execution
-   placement, and lifecycle, but never tool schemas, implementations, routing,
-   or protocol encoding.
+   declarations, and launch a required JavaScript-module payload over a raw
+   bidirectional byte channel. Runtimes own module evaluation, channel pairing,
+   execution placement, and lifecycle, but never tool schemas, implementations,
+   routing, or protocol encoding.
 
 The core contract is independent of a particular execution substrate. Host
-Node.js is the first runtime and Node.js inside `@torkbot/sandbox` is the first
-isolated runtime. Both must pass the same exported black-box conformance suite.
+Node.js is the built-in runtime. Node.js in `@torkbot/sandbox`, Deno, Bun,
+workers, and remote sandbox vendors can implement the same contract without
+introducing their launch mechanics into core. Every runtime must pass the same
+exported black-box conformance suite.

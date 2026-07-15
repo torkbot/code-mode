@@ -9,18 +9,18 @@ import {
 import { maximumBsonFrameLength, readProgramMessages } from "./protocol/codec.ts";
 import type {
   ByteChannel,
-  Program,
   Runtime,
   RuntimeFinished,
   RuntimeInstance,
+  RuntimePayload,
 } from "./runtime.ts";
 import { maximumTelemetryErrorMessageLength } from "./telemetry.ts";
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
-test("a supplied runtime receives a generated JavaScript module and exposes a byte channel", async () => {
-  let observedProgram: Program | undefined;
+test("a supplied runtime receives a generated JavaScript module payload and exposes its channel peer", async () => {
+  let observedPayload: RuntimePayload | undefined;
   const observedWrites: Uint8Array[] = [];
   let outgoingClosed = false;
   let terminationReason: string | undefined;
@@ -44,7 +44,7 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
       return [];
     },
     async start(req) {
-      observedProgram = req.program;
+      observedPayload = req.payload;
 
       const instance: RuntimeInstance = {
         channel,
@@ -60,30 +60,31 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
 
   const controller = new AbortController();
   const instance = await runtime.start({
-    program: createProgram("async () => ({ value: 42 })"),
+    payload: createProgram("async () => ({ value: 42 })"),
     signal: controller.signal,
   });
 
+  assert.equal(observedPayload?.kind, "javascript-module");
   assert.match(
-    observedProgram?.source ?? "",
+    observedPayload?.source ?? "",
     /export async function startProgram\(channel\)/,
   );
-  assert.doesNotMatch(observedProgram?.source ?? "", /globalThis\.__/);
-  assert.doesNotMatch(observedProgram?.source ?? "", /from "flatted"/);
-  assert.doesNotMatch(observedProgram?.source ?? "", /from 'flatted'/);
-  assert.doesNotMatch(observedProgram?.source ?? "", /const run = \(\(/);
-  assert.match(observedProgram?.source ?? "", /Bundled from flatted/);
-  assert.match(observedProgram?.source ?? "", /flattedStringify/);
+  assert.doesNotMatch(observedPayload?.source ?? "", /globalThis\.__/);
+  assert.doesNotMatch(observedPayload?.source ?? "", /from "flatted"/);
+  assert.doesNotMatch(observedPayload?.source ?? "", /from 'flatted'/);
+  assert.doesNotMatch(observedPayload?.source ?? "", /const run = \(\(/);
+  assert.match(observedPayload?.source ?? "", /Bundled from flatted/);
+  assert.match(observedPayload?.source ?? "", /flattedStringify/);
   assert.match(
-    observedProgram?.source ?? "",
+    observedPayload?.source ?? "",
     /function __createCodeModeAgentProgram\(console, globalThis, global, Promise\)/,
   );
-  assert.match(observedProgram?.source ?? "", /readBsonFrames\(channel\.incoming\)/);
-  assert.match(observedProgram?.source ?? "", /channel\.outgoing\.write/);
-  assert.match(observedProgram?.source ?? "", /kind: "program-log"/);
-  assert.match(observedProgram?.source ?? "", /codemode: new Proxy/);
-  assert.match(observedProgram?.source ?? "", /async \(\) => \(\{ value: 42 \}\)/);
-  assert.match(observedProgram?.source ?? "", /await run\(scope\)/);
+  assert.match(observedPayload?.source ?? "", /readBsonFrames\(channel\.incoming\)/);
+  assert.match(observedPayload?.source ?? "", /channel\.outgoing\.write/);
+  assert.match(observedPayload?.source ?? "", /kind: "program-log"/);
+  assert.match(observedPayload?.source ?? "", /codemode: new Proxy/);
+  assert.match(observedPayload?.source ?? "", /async \(\) => \(\{ value: 42 \}\)/);
+  assert.match(observedPayload?.source ?? "", /await run\(scope\)/);
 
   const chunks: Uint8Array[] = [];
   for await (const chunk of instance.channel.incoming) {
@@ -105,6 +106,7 @@ test("a supplied runtime receives a generated JavaScript module and exposes a by
 test("createProgram returns a self-contained module", () => {
   const program = createProgram("async () => ({ message: 'hello from code-mode' })");
 
+  assert.equal(program.kind, "javascript-module");
   assert.match(program.source, /export async function startProgram\(channel\)/);
   assert.doesNotMatch(program.source, /globalThis\.__/);
   assert.doesNotMatch(program.source, /from "flatted"/);
