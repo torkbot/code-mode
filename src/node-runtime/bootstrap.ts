@@ -5,7 +5,7 @@ export const nodeChannelFileDescriptor = 3;
 export function createNodeBootstrapSource(payload: RuntimePayload): string {
   return `
 import { once } from "node:events";
-import { createReadStream, createWriteStream } from "node:fs";
+import { closeSync, createReadStream, createWriteStream } from "node:fs";
 import { registerHooks } from "node:module";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -57,22 +57,47 @@ if (typeof start !== "function") {
   throw new Error("Code-mode source program must export startProgram()");
 }
 
-const inputIterator = input[Symbol.asyncIterator]();
+let settlePendingRead;
 const readable = new ReadableStream({
-  async pull(controller) {
-    const next = await inputIterator.next();
-    if (next.done) {
-      controller.close();
-      return;
-    }
-    if (!(next.value instanceof Uint8Array)) {
-      controller.error(new Error("Code-mode byte channel emitted an unsupported chunk"));
-      return;
-    }
-    controller.enqueue(next.value);
+  pull(controller) {
+    return new Promise((resolve) => {
+      const cleanup = () => {
+        input.off("data", onData);
+        input.off("end", onEnd);
+        input.off("error", onError);
+        settlePendingRead = undefined;
+      };
+      const settle = () => {
+        input.pause();
+        cleanup();
+        resolve();
+      };
+      const onData = (chunk) => {
+        if (chunk instanceof Uint8Array) {
+          controller.enqueue(chunk);
+        } else {
+          controller.error(new Error("Code-mode byte channel emitted an unsupported chunk"));
+        }
+        settle();
+      };
+      const onEnd = () => {
+        controller.close();
+        settle();
+      };
+      const onError = (error) => {
+        controller.error(error);
+        settle();
+      };
+
+      settlePendingRead = settle;
+      input.once("data", onData);
+      input.once("end", onEnd);
+      input.once("error", onError);
+      input.resume();
+    });
   },
   cancel() {
-    input.pause();
+    settlePendingRead?.();
   },
 }, { highWaterMark: 0 });
 const writable = new WritableStream({
@@ -102,6 +127,13 @@ const writable = new WritableStream({
   },
 });
 
-await start({ readable, writable });
+try {
+  await start({ readable, writable });
+} finally {
+  // Releasing fd 3 also wakes any native read that was pending when the Web
+  // Stream was cancelled. The payload task has ended, so that wakeup is cleanup.
+  input.on("error", () => {});
+  closeSync(channelFd);
+}
 `;
 }

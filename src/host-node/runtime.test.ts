@@ -190,6 +190,37 @@ test("host-node readable cancellation preserves the writable half of fd 3", asyn
   assert.ok(Date.now() - startedAt < 2_000);
 });
 
+test("host-node cancellation settles a pending fd 3 read", async () => {
+  const startedAt = Date.now();
+  const runtime = await createHostNodeRuntime();
+  const instance = await runtime.start({
+    payload: {
+      kind: "javascript-module",
+      source: `export async function startProgram(channel) {
+        const reader = channel.readable.getReader();
+        const read = reader.read();
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        await reader.cancel();
+        const result = await read;
+        if (!result.done) throw new Error("cancelled read produced a chunk");
+        const writer = channel.writable.getWriter();
+        await writer.write(new TextEncoder().encode("after pending cancel"));
+        await writer.close();
+      }`,
+    },
+    signal: AbortSignal.timeout(5_000),
+  });
+
+  const chunks: Uint8Array[] = [];
+  for await (const chunk of instance.channel.readable) {
+    chunks.push(chunk);
+  }
+
+  assert.equal(Buffer.concat(chunks).toString("utf8"), "after pending cancel");
+  assert.deepEqual(await instance.finished, { kind: "closed" });
+  assert.ok(Date.now() - startedAt < 2_000);
+});
+
 test("host-node rejects binaries outside its Node 24 target", async () => {
   const runtime = new HostNodeRuntime("/bin/echo");
 
