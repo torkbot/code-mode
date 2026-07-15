@@ -51,7 +51,10 @@ test("node adapter turns a runtime payload into a caller-launched Node entrypoin
   assert.equal(launchRequest?.channelFileDescriptor, 3);
   assert.match(launchRequest?.bootstrapSource ?? "", /const channelFd = 3/);
   assert.match(launchRequest?.bootstrapSource ?? "", /payload sentinel/);
-  assert.match(launchRequest?.bootstrapSource ?? "", /await start\(\{/);
+  assert.match(
+    launchRequest?.bootstrapSource ?? "",
+    /await start\(Duplex\.toWeb\(channel\)\)/,
+  );
   assert.match(
     launchRequest?.bootstrapSource ?? "",
     /resolve\(process\.cwd\(\), "\.code-mode-runtime-payload\.mjs"\)/,

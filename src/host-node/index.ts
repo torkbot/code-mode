@@ -71,7 +71,7 @@ class HostNodeRuntimeHost implements Node24RuntimeHost {
       throw new Error("Host Node.js runtime did not create stderr");
     }
 
-    const channel = createWebChannel(channelStream);
+    const channel = Duplex.toWeb(channelStream);
     const launched = new Promise<void>((resolve, reject) => {
       const cleanup = (): void => {
         child.off("error", onError);
@@ -223,98 +223,6 @@ function appendTextTail(current: string, chunk: string): string {
   return overflow > 0
     ? `${current.slice(overflow)}${chunk}`
     : `${current}${chunk}`;
-}
-
-function createWebChannel(stream: Duplex): RuntimeInstance["channel"] {
-  let settlePendingRead: (() => void) | undefined;
-  const readable = new ReadableStream<Uint8Array>({
-    pull(controller) {
-      return new Promise<void>((resolve) => {
-        const cleanup = (): void => {
-          stream.off("data", onData);
-          stream.off("end", onEnd);
-          stream.off("error", onError);
-          stream.off("close", onClose);
-          settlePendingRead = undefined;
-        };
-        const settle = (): void => {
-          stream.pause();
-          cleanup();
-          resolve();
-        };
-        const onData = (chunk: unknown): void => {
-          if (chunk instanceof Uint8Array) {
-            controller.enqueue(chunk);
-          } else {
-            controller.error(
-              new Error("Host Node.js runtime emitted an unsupported channel chunk"),
-            );
-          }
-          settle();
-        };
-        const onEnd = (): void => {
-          controller.close();
-          settle();
-        };
-        const onError = (error: Error): void => {
-          controller.error(error);
-          settle();
-        };
-        const onClose = (): void => {
-          controller.close();
-          settle();
-        };
-
-        settlePendingRead = settle;
-        stream.once("data", onData);
-        stream.once("end", onEnd);
-        stream.once("error", onError);
-        stream.once("close", onClose);
-        stream.resume();
-      });
-    },
-    cancel() {
-      settlePendingRead?.();
-    },
-  }, { highWaterMark: 0 });
-  const writable = new WritableStream<Uint8Array>({
-    write(chunk) {
-      return new Promise<void>((resolve, reject) => {
-        stream.write(chunk, (error) => {
-          if (error === null || error === undefined) {
-            resolve();
-          } else {
-            reject(error);
-          }
-        });
-      });
-    },
-    close() {
-      if (stream.destroyed || stream.writableEnded) {
-        return;
-      }
-      return new Promise<void>((resolve, reject) => {
-        const cleanup = (): void => {
-          stream.off("error", onError);
-          stream.off("finish", onFinish);
-        };
-        const onError = (error: Error): void => {
-          cleanup();
-          reject(error);
-        };
-        const onFinish = (): void => {
-          cleanup();
-          resolve();
-        };
-
-        stream.once("error", onError);
-        stream.once("finish", onFinish);
-        stream.end();
-      });
-    },
-  });
-
-  return { readable, writable };
 }
 
 function assertChannelStream(
