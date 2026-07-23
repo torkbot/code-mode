@@ -29,6 +29,10 @@
       "types": "./dist/runner/source.d.ts",
       "default": "./dist/runner/source.js"
     },
+    "./node-runtime": {
+      "types": "./dist/node-runtime/index.d.ts",
+      "default": "./dist/node-runtime/index.js"
+    },
     "./host-node": {
       "types": "./dist/host-node/index.d.ts",
       "default": "./dist/host-node/index.js"

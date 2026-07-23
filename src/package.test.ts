@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { runnerSource } from "./runner/source.ts";
 
-test("package exports the client, runtime-author, runner, host-node, and testing surfaces", async () => {
+test("package exports the client, runtime-author, runner, Node authoring, host-node, and testing surfaces", async () => {
   const packageJson = JSON.parse(await readFile(
     new URL("../package.json", import.meta.url),
     "utf8",
@@ -18,6 +18,7 @@ test("package exports the client, runtime-author, runner, host-node, and testing
     "./runtime",
     "./runner",
     "./runner/source",
+    "./node-runtime",
     "./host-node",
     "./testing",
   ]);
@@ -56,6 +57,17 @@ test("runner ships as both a normal module and self-contained source", async () 
   assert.equal(typeof loaded.startRunner, "function");
 });
 
+test("Node runtime authoring surface owns Node 24 declarations and guest bootstrap semantics", async () => {
+  const nodeRuntime = await readFile(
+    new URL("./node-runtime/index.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(nodeRuntime, /assertNode24Version/);
+  assert.match(nodeRuntime, /createNode24BootstrapSource/);
+  assert.match(nodeRuntime, /loadNode24TypeDefinitionFiles/);
+  assert.doesNotMatch(nodeRuntime, /spawn|execFile|RuntimeConnection/);
+});
+
 test("host-node is a factory over the public runtime-driver seam", async () => {
   const hostNode = await readFile(
     new URL("./host-node/index.ts", import.meta.url),
@@ -64,7 +76,9 @@ test("host-node is a factory over the public runtime-driver seam", async () => {
   assert.match(hostNode, /createHostNodeRuntime/);
   assert.match(hostNode, /createRuntimeFactory/);
   assert.match(hostNode, /RuntimeDriver<HostNodeRuntimeOptions>/);
+  assert.match(hostNode, /createNode24BootstrapSource/);
   assert.doesNotMatch(hostNode, /class HostNodeRuntime|class Node24Runtime/);
+  assert.doesNotMatch(hostNode, /registerHooks|programSources|createStream/);
 });
 
 test("conformance tests cross only the public runtime and client interfaces", async () => {

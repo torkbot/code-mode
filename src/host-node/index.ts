@@ -9,8 +9,9 @@ import type {
 import { createRuntimeFactory } from "../core/runtime.ts";
 import {
   assertNode24Version,
+  createNode24BootstrapSource,
   loadNode24TypeDefinitionFiles,
-} from "../node-runtime/node24.ts";
+} from "../node-runtime/index.ts";
 
 /** Options for booting the built-in persistent Node.js runtime. */
 export interface HostNodeRuntimeOptions {
@@ -111,7 +112,10 @@ async function launchHostNode(
   try {
     await waitForSpawn(child, signal);
     const writer = Writable.toWeb(stdin).getWriter();
-    await writer.write(Buffer.from(createNodeBootstrapSource(runnerSource), "utf8"));
+    await writer.write(Buffer.from(createNode24BootstrapSource({
+      runnerSource,
+      channelFileDescriptor,
+    }), "utf8"));
     await writer.close();
     signal.throwIfAborted();
   } catch (error) {
@@ -136,87 +140,6 @@ async function launchHostNode(
       await finished;
     },
   };
-}
-
-function createNodeBootstrapSource(runnerSource: string): string {
-  return `${runnerSource}
-import { Console } from "node:console";
-import { randomUUID } from "node:crypto";
-import { registerHooks } from "node:module";
-import { Socket } from "node:net";
-import { resolve } from "node:path";
-import { Duplex, Writable } from "node:stream";
-import { pathToFileURL } from "node:url";
-
-const channel = new Socket({
-  fd: ${channelFileDescriptor},
-  readable: true,
-  writable: true,
-  allowHalfOpen: true,
-});
-const programResolutionBaseUrl = pathToFileURL(
-  resolve(process.cwd(), ".code-mode-program.mjs"),
-).href;
-const programSources = new Map();
-const hooks = registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (programSources.has(specifier)) {
-      return { shortCircuit: true, url: specifier };
-    }
-    if (context.parentURL?.startsWith("code-mode:program?") === true) {
-      return nextResolve(specifier, {
-        ...context,
-        parentURL: programResolutionBaseUrl,
-      });
-    }
-    return nextResolve(specifier, context);
-  },
-  load(url, context, nextLoad) {
-    const source = programSources.get(url);
-    if (source !== undefined) {
-      return { format: "module", shortCircuit: true, source };
-    }
-    return nextLoad(url, context);
-  },
-});
-
-try {
-  await startRunner({
-    channel: Duplex.toWeb(channel),
-    schedule: (execute) => execute(),
-    async importModule({ source, signal }) {
-      signal.throwIfAborted();
-      const programUrl = "code-mode:program?" + randomUUID();
-      programSources.set(programUrl, source);
-      try {
-        return await import(programUrl);
-      } finally {
-        programSources.delete(programUrl);
-      }
-    },
-    createConsole(emit) {
-      const createStream = (stream) => new Writable({
-        write(chunk, _encoding, callback) {
-          try {
-            emit({ stream, text: chunk.toString() });
-            callback();
-          } catch (error) {
-            callback(error);
-          }
-        },
-      });
-      return new Console({
-        stdout: createStream("stdout"),
-        stderr: createStream("stderr"),
-        colorMode: false,
-      });
-    },
-  });
-} finally {
-  hooks.deregister();
-  channel.destroy();
-}
-`;
 }
 
 async function assertHostNode24(
