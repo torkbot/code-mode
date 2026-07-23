@@ -1,4 +1,4 @@
-import { HostNodeRuntime } from "./src/host-node/index.ts";
+import { createHostNodeRuntime } from "./src/host-node/index.ts";
 import { createClient, createToolbox, defineTool } from "./src/index.ts";
 import { testSchema } from "./src/testing/schema.ts";
 
@@ -55,31 +55,38 @@ async function main() {
   );
   const toolbox = createToolbox([listFlights]);
 
-  const runtime = new HostNodeRuntime(process.execPath);
+  const runtime = await createHostNodeRuntime({
+    nodePath: process.execPath,
+    cwd: process.cwd(),
+  }, AbortSignal.timeout(5_000));
 
-  const client = createClient({
-    runtime,
-    toolbox,
-  });
-
-  console.log(toolbox.typeDefinitions);
-
-  const source = `async ({ codemode }) => {
-    await codemode.listFlights({
-      source: "YYZ",
-      dest: "LHR",
-      departureDate: "5",
-      returnDate: "2026-07-08",
+  try {
+    const client = createClient({
+      runtime,
+      toolbox,
     });
-  }`;
 
-  console.dir(await client.validate(source, AbortSignal.timeout(5_000)));
+    console.log(toolbox.typeDefinitions);
 
-  const outcome = await client.run(source, {
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (outcome.kind === "program-failed" && outcome.error.details !== null) {
-    console.dir(outcome.error.details.report);
+    const source = `export default async function ({ codemode }: AgentProgramScope) {
+      await codemode.listFlights({
+        source: "YYZ",
+        dest: "LHR",
+        departureDate: "5",
+        returnDate: "2026-07-08",
+      });
+    }`;
+
+    console.dir(await client.validate(source, AbortSignal.timeout(5_000)));
+
+    const outcome = await client.run(source, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (outcome.kind === "program-failed" && outcome.error.details !== null) {
+      console.dir(outcome.error.details.report);
+    }
+  } finally {
+    await runtime[Symbol.asyncDispose]();
   }
 }
 

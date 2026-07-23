@@ -3,36 +3,43 @@ import type {
   StandardSchemaV1,
 } from "@standard-schema/spec";
 
-export type {
-  StandardJSONSchemaV1,
-  StandardSchemaV1,
-  StandardTypedV1,
-} from "@standard-schema/spec";
-
+/**
+ * Standard Schema validator that can also describe both sides of its optional
+ * transformation as Standard JSON Schema.
+ */
 export type ToolSchema<Input = unknown, Output = Input> =
   & StandardSchemaV1<Input, Output>
   & StandardJSONSchemaV1<Input, Output>;
 
+/** Value accepted before a ToolSchema applies its input transformation. */
 export type SchemaInput<Schema extends ToolSchema<any, any>> =
   StandardSchemaV1.InferInput<Schema>;
 
+/** Value produced after a ToolSchema applies its transformation. */
 export type SchemaOutput<Schema extends ToolSchema<any, any>> =
   StandardSchemaV1.InferOutput<Schema>;
 
-export interface ToolDefinition<
+/** Agent-facing description and schemas for one code-mode tool. */
+interface ToolDefinition<
   InputSchema extends ToolSchema<any, any> = ToolSchema<any, any>,
   OutputSchema extends ToolSchema<any, any> = ToolSchema<any, any>,
 > {
+  /** Concise instructions included in generated agent declarations. */
   readonly description: string;
+  /** Schema used to validate and transform program-supplied input. */
   readonly inputSchema: InputSchema;
+  /** Schema used to validate and transform handler-supplied output. */
   readonly outputSchema: OutputSchema;
 }
 
-export interface ToolExecutionContext {
+/** Per-call host context passed to a tool handler. */
+interface ToolExecutionContext {
+  /** Aborts when the program execution no longer needs this tool call. */
   readonly signal: AbortSignal;
 }
 
-export type ToolHandler<
+/** Host implementation for one tool definition. */
+type ToolHandler<
   InputSchema extends ToolSchema<any, any> = ToolSchema<any, any>,
   OutputSchema extends ToolSchema<any, any> = ToolSchema<any, any>,
 > = (
@@ -40,12 +47,15 @@ export type ToolHandler<
   input: SchemaOutput<NoInfer<InputSchema>>,
 ) => Promise<SchemaInput<NoInfer<OutputSchema>>>;
 
+/** Validated tool definition with its registered name and host handler. */
 export interface ExecutableToolDefinition<
   Name extends string = string,
   InputSchema extends ToolSchema<any, any> = ToolSchema<any, any>,
   OutputSchema extends ToolSchema<any, any> = ToolSchema<any, any>,
 > extends ToolDefinition<InputSchema, OutputSchema> {
+  /** JavaScript identifier exposed as `codemode.<name>`. */
   readonly name: Name;
+  /** Execute the host tool after input validation and transformation. */
   execute: ToolHandler<InputSchema, OutputSchema>;
   readonly [executableToolDefinitionBrand]: {
     readonly inputSchema: InputSchema;
@@ -53,14 +63,16 @@ export interface ExecutableToolDefinition<
   };
 }
 
+/** Immutable tool collection and its complete agent-facing declarations. */
 export interface Toolbox {
+  /** Ambient TypeScript declarations supplied to an agent and checker. */
   readonly typeDefinitions: string;
   readonly [toolboxBrand]: true;
 }
 
 export type ExecutableToolDefinitions = Readonly<Record<string, ExecutableToolDefinition>>;
 
-export interface TypeGenerationRequest {
+interface TypeGenerationRequest {
   readonly tools: readonly ExecutableToolDefinition[];
 }
 
@@ -68,12 +80,20 @@ const executableToolDefinitionBrand: unique symbol = Symbol("ExecutableToolDefin
 const toolboxBrand: unique symbol = Symbol("Toolbox");
 
 interface ToolboxState {
-  readonly list: readonly ExecutableToolDefinition[];
   readonly byName: ExecutableToolDefinitions;
 }
 
 const toolboxStates = new WeakMap<Toolbox, ToolboxState>();
 
+/**
+ * Define one named tool from Standard Schema definitions and an async host
+ * handler. Add the returned definition to createToolbox().
+ *
+ * @param name JavaScript identifier exposed as `codemode.<name>`.
+ * @param definition Agent-facing description plus input and output schemas.
+ * @param execute Host handler called after input validation and transformation.
+ * @returns An executable definition accepted by createToolbox().
+ */
 export function defineTool<
   const Name extends string,
   const InputSchema extends ToolSchema<any, any>,
@@ -94,6 +114,13 @@ export function defineTool<
   };
 }
 
+/**
+ * Validate a flat list of uniquely named tools and generate the TypeScript
+ * declarations used by code-mode agents.
+ *
+ * @param tools Complete set of tools to expose on the agent's `codemode` object.
+ * @returns An immutable Toolbox for createClient().
+ */
 export function createToolbox(tools: readonly ExecutableToolDefinition[]): Toolbox {
   if (!Array.isArray(tools)) {
     throw new Error("Code-mode tools must be an array");
@@ -127,16 +154,12 @@ export function createToolbox(tools: readonly ExecutableToolDefinition[]): Toolb
     typeDefinitions: generateTypes({ tools: list }),
     [toolboxBrand]: true,
   };
-  toolboxStates.set(toolbox, { list, byName });
+  toolboxStates.set(toolbox, { byName });
   return toolbox;
 }
 
 export function getToolboxTools(toolbox: Toolbox): ExecutableToolDefinitions {
   return getToolboxState(toolbox).byName;
-}
-
-export function getToolboxToolList(toolbox: Toolbox): readonly ExecutableToolDefinition[] {
-  return getToolboxState(toolbox).list;
 }
 
 function getToolboxState(toolbox: Toolbox): ToolboxState {
@@ -149,7 +172,7 @@ function getToolboxState(toolbox: Toolbox): ToolboxState {
   return state;
 }
 
-export type SupportedJsonSchema =
+type SupportedJsonSchema =
   | ObjectJsonSchema
   | ArrayJsonSchema
   | StringJsonSchema
@@ -158,7 +181,7 @@ export type SupportedJsonSchema =
   | BooleanJsonSchema
   | NullJsonSchema;
 
-export interface ObjectJsonSchema {
+interface ObjectJsonSchema {
   readonly type: "object";
   readonly description?: string;
   readonly properties: Readonly<Record<string, SupportedJsonSchema>>;
@@ -166,34 +189,34 @@ export interface ObjectJsonSchema {
   readonly additionalProperties: false;
 }
 
-export interface ArrayJsonSchema {
+interface ArrayJsonSchema {
   readonly type: "array";
   readonly description?: string;
   readonly items: SupportedJsonSchema;
 }
 
-export interface StringJsonSchema {
+interface StringJsonSchema {
   readonly type: "string";
   readonly description?: string;
   readonly format?: string;
 }
 
-export interface NumberJsonSchema {
+interface NumberJsonSchema {
   readonly type: "number";
   readonly description?: string;
 }
 
-export interface IntegerJsonSchema {
+interface IntegerJsonSchema {
   readonly type: "integer";
   readonly description?: string;
 }
 
-export interface BooleanJsonSchema {
+interface BooleanJsonSchema {
   readonly type: "boolean";
   readonly description?: string;
 }
 
-export interface NullJsonSchema {
+interface NullJsonSchema {
   readonly type: "null";
   readonly description?: string;
 }
@@ -205,24 +228,26 @@ interface AgentToolDefinition {
   readonly outputSchema: SupportedJsonSchema;
 }
 
-export function generateTypes(req: TypeGenerationRequest): string {
+function generateTypes(req: TypeGenerationRequest): string {
   const tools = req.tools.map(toAgentToolDefinition);
   const methods = tools.map(printTool);
 
   return [
+    ...printJSDoc("", [
+      "Minimal text console supplied to the program by the runtime.",
+    ]),
     `interface CodeModeConsole {`,
+    ...printJSDoc("  ", ["Emit diagnostic text on stdout."]),
     `  debug(...values: unknown[]): void;`,
+    ...printJSDoc("  ", ["Emit error text on stderr."]),
     `  error(...values: unknown[]): void;`,
+    ...printJSDoc("  ", ["Emit informational text on stdout."]),
     `  info(...values: unknown[]): void;`,
+    ...printJSDoc("  ", ["Emit ordinary text on stdout."]),
     `  log(...values: unknown[]): void;`,
+    ...printJSDoc("  ", ["Emit warning text on stderr."]),
     `  warn(...values: unknown[]): void;`,
     `}`,
-    ``,
-    `type CodeModeGlobalThis = Omit<typeof globalThis, "console" | "global" | "globalThis"> & {`,
-    `  readonly console: CodeModeConsole;`,
-    `  readonly global: CodeModeGlobalThis;`,
-    `  readonly globalThis: CodeModeGlobalThis;`,
-    `};`,
     ``,
     `type Exact<Expected, Actual> = Actual extends Expected`,
     `  ? Actual extends readonly unknown[]`,
@@ -234,6 +259,7 @@ export function generateTypes(req: TypeGenerationRequest): string {
     `      : Actual`,
     `  : Expected;`,
     ``,
+    ...printJSDoc("", ["Host tools available to the submitted program."]),
     `interface Tools {`,
     `  readonly constructor?: never;`,
     `  readonly hasOwnProperty?: never;`,
@@ -249,28 +275,33 @@ export function generateTypes(req: TypeGenerationRequest): string {
       "The object supplied by the code-mode runner when it invokes your program.",
     ]),
     `interface AgentProgramScope {`,
+    ...printJSDoc("  ", ["Host tools available to this program."]),
     `  readonly codemode: Tools;`,
+    ...printJSDoc("  ", ["The only console whose output the runtime captures."]),
+    `  readonly console: CodeModeConsole;`,
     `}`,
     ``,
     ...printJSDoc("", agentProgramDescriptionLines),
-    `type AgentProgram = (scope: AgentProgramScope) => Promise<void>;`,
+    `type AgentProgram = (scope: AgentProgramScope) => unknown;`,
     "",
   ].join("\n");
 }
 
 const agentProgramDescriptionLines = [
-  "Code submitted to a code-mode runner must be a single async function expression assignable to this type.",
+  "Code submitted to a code-mode runner must be an ECMAScript module and must default-export a function assignable to this type.",
   "",
-  "Submit only the function expression as the code string. Do not include these declarations, markdown fences, static imports, exports, or wrapper variables.",
+  "Submit only the module source. Do not include these declarations or markdown fences. Static imports are supported when the runtime can resolve them.",
   "",
-  "The runner calls the function with `{ codemode }`. Use `codemode.<toolName>(input)` to call the tools declared above, await returned promises, and return nothing when complete.",
+  "The runner calls the default export with `{ codemode, console }`, awaits it, and ignores its fulfilled value. Use `codemode.<toolName>(input)` to call the tools declared above.",
   "",
-  "If you need modules supplied by the runtime environment, use dynamic `await import(\"module-name\")` inside the async function.",
+  "Only the `console` passed in the scope is captured as program output. Ambient and imported consoles are outside the output contract.",
   "",
   "Example shape:",
-  "async ({ codemode }) => {",
+  "import { inspect } from \"node:util\";",
+  "",
+  "export default async function ({ codemode, console }: AgentProgramScope) {",
   "  const result = await codemode.someTool({ key: \"value\" });",
-  "  console.log(result);",
+  "  console.log(inspect(result));",
   "}",
 ] as const;
 

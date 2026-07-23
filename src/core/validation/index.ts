@@ -4,24 +4,39 @@ import type { FileSystem, FileSystemEntries } from "typescript/unstable/fs";
 
 import type { TypeDefinitionFile } from "../runtime.ts";
 
+/** Internal inputs for checking one submitted agent module. */
 export interface ValidateAgentSourceRequest {
+  /** Exact TypeScript ESM source submitted by the agent. */
   readonly source: string;
+  /** Generated declarations for the toolbox and program contract. */
   readonly typeDefinitions: string;
+  /** Checker-only declarations supplied by the Runtime. */
   readonly typeDefinitionFiles: readonly TypeDefinitionFile[];
+  /** Cancels checker setup and diagnostic collection. */
   readonly signal: AbortSignal;
 }
 
+/** Internal failed-check result used to build the public ValidationResult. */
 export interface TypecheckFailure {
+  /** Stable discriminator for a TypeScript checking failure. */
   readonly kind: "typecheck";
+  /** Bounded diagnostics with submitted-source coordinates. */
   readonly diagnostics: readonly TypecheckDiagnostic[];
+  /** Bounded text report intended for the submitting agent. */
   readonly report: string;
 }
 
+/** One serializable TypeScript diagnostic returned by Client.validate(). */
 export interface TypecheckDiagnostic {
+  /** Submitted or virtual project file associated with the diagnostic. */
   readonly file: string;
+  /** One-based source line. */
   readonly line: number;
+  /** One-based source column. */
   readonly column: number;
+  /** TypeScript diagnostic code, such as `TS2322`. */
   readonly code: string;
+  /** Flattened TypeScript diagnostic message. */
   readonly message: string;
 }
 
@@ -33,10 +48,11 @@ const maxReportLength = 8_000;
 
 const projectRoot = "/__code_mode__";
 const agentFile = `${projectRoot}/agent.mts`;
+const contractFile = `${projectRoot}/validate.mts`;
 const typesFile = `${projectRoot}/codemode.d.ts`;
 const tsconfigFile = `${projectRoot}/tsconfig.json`;
-const agentSourceLineOffset = 2;
 
+/** Check submitted source against its generated and runtime declarations. */
 export async function validateAgentSource(
   req: ValidateAgentSourceRequest,
 ): Promise<TypecheckFailure | undefined> {
@@ -98,7 +114,8 @@ function createValidationFiles(
 ): ReadonlyMap<string, string> {
   const files = new Map([
     [typesFile, req.typeDefinitions],
-    [agentFile, createAgentTypecheckSource(req.source)],
+    [agentFile, req.source],
+    [contractFile, createContractTypecheckSource()],
   ]);
   const runtimeTypePaths: string[] = [];
 
@@ -141,12 +158,10 @@ function toVirtualRuntimeTypePath(path: string): string {
   return `${projectRoot}/${path}`;
 }
 
-function createAgentTypecheckSource(source: string): string {
+function createContractTypecheckSource(): string {
   return [
-    `/// <reference path="./codemode.d.ts" />`,
-    `const program: AgentProgram = (() => { const console: CodeModeConsole = undefined as never; const globalThis: CodeModeGlobalThis = undefined as never; const global: CodeModeGlobalThis = undefined as never; const Promise: PromiseConstructor = undefined as never; const submitted: AgentProgram = (`,
-    source,
-    `); return submitted; })();`,
+    `import submitted from "./agent.mjs";`,
+    `const program: AgentProgram = submitted;`,
     `void program;`,
     "",
   ].join("\n");
@@ -174,7 +189,12 @@ function createTypecheckTsconfig(runtimeTypePaths: readonly string[]): string {
         noEmit: true,
         skipLibCheck: true,
       },
-      files: ["agent.mts", "codemode.d.ts", ...runtimeTypePaths],
+      files: [
+        "agent.mts",
+        "validate.mts",
+        "codemode.d.ts",
+        ...runtimeTypePaths,
+      ],
     },
     null,
     2,
@@ -412,26 +432,16 @@ function getDiagnosticSourceAndPosition(
   readonly position: { readonly line: number; readonly column: number };
 } {
   if (diagnostic.fileName === agentFile) {
-    const wrappedSource = files.get(agentFile);
-    if (wrappedSource === undefined) {
-      return {
-        source: agentSource,
-        position: { line: 1, column: 1 },
-      };
-    }
-
-    const wrappedPosition = getLineAndColumn(wrappedSource, diagnostic.pos);
-    const submittedLine = Math.max(
-      1,
-      wrappedPosition.line - agentSourceLineOffset,
-    );
-    const maximumLine = Math.max(1, agentSource.split("\n").length);
     return {
       source: agentSource,
-      position: {
-        line: Math.min(submittedLine, maximumLine),
-        column: wrappedPosition.column,
-      },
+      position: getLineAndColumn(agentSource, diagnostic.pos),
+    };
+  }
+
+  if (diagnostic.fileName === contractFile) {
+    return {
+      source: agentSource,
+      position: { line: 1, column: 1 },
     };
   }
 
@@ -451,7 +461,7 @@ function diagnosticCode(diagnostic: Diagnostic): string {
 }
 
 function formatDiagnosticFile(fileName: string | undefined): string {
-  if (fileName === agentFile) {
+  if (fileName === agentFile || fileName === contractFile) {
     return "agent.ts";
   }
 

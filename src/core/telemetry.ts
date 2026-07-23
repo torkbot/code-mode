@@ -1,62 +1,94 @@
-import type { RunOutcome } from "./execution.ts";
+import type { RunOutcome } from "./runtime.ts";
 
+/** JSON-serializable error shape used by outcomes and telemetry. */
 export interface TelemetryError {
+  /** Error class or supplied `name` value. */
   readonly name: string;
+  /** Human-readable failure message. */
   readonly message: string;
+  /** Stack text when it could be read safely. */
   readonly stack: string | null;
+  /** Structured details for error kinds understood by the client. */
   readonly details: ErrorDetails | null;
 }
 
+/** Maximum serialized error-name length. */
 export const maximumTelemetryErrorNameLength = 256;
+/** Maximum serialized error-message length. */
 export const maximumTelemetryErrorMessageLength = 64 * 1024;
+/** Maximum serialized stack length. */
 export const maximumTelemetryErrorStackLength = 128 * 1024;
+/** Maximum serialized structured report length. */
 export const maximumTelemetryErrorReportLength = 8 * 1024;
 
+/** Structured, agent-readable context attached to known failures. */
 export type ErrorDetails =
   | {
+      /** A host tool rejected its input or output schema. */
       readonly kind: "tool-validation";
+      /** Bounded validation report including an agent-source excerpt. */
       readonly report: string;
     };
 
-export type ProgramLogLevel = "debug" | "info" | "log" | "warn" | "error";
-
+/** Live observations emitted while Client.run() executes a program. */
 export type TelemetryEvent =
   | {
-      readonly kind: "program-log";
-      readonly level: ProgramLogLevel;
-      readonly message: string;
-      readonly values: readonly unknown[];
+      /** The scope-only program console emitted text. */
+      readonly kind: "program-output";
+      /** Logical destination selected by the console method. */
+      readonly stream: "stdout" | "stderr";
+      /** Runtime-formatted output text. */
+      readonly text: string;
     }
   | {
+      /** A validated host tool call is about to begin. */
       readonly kind: "tool-call-started";
+      /** Client-local opaque identifier for correlating tool events. */
       readonly toolCallId: string;
+      /** Registered toolbox name. */
       readonly toolName: string;
+      /** Untransformed value received from the program. */
       readonly input: unknown;
     }
   | {
+      /** A host tool call completed and its output passed validation. */
       readonly kind: "tool-call-completed";
+      /** Client-local opaque identifier matching the start event. */
       readonly toolCallId: string;
+      /** Registered toolbox name. */
       readonly toolName: string;
+      /** Transformed output returned to the program. */
       readonly output: unknown;
     }
   | {
+      /** A host tool call or its schema validation failed. */
       readonly kind: "tool-call-failed";
+      /** Client-local opaque identifier matching the start event. */
       readonly toolCallId: string;
+      /** Registered toolbox name. */
       readonly toolName: string;
+      /** Untransformed value received from the program. */
       readonly input: unknown;
+      /** Serializable tool failure. */
       readonly error: TelemetryError;
     }
   | {
+      /** Program evaluation reached a success or program-failed outcome. */
       readonly kind: "execution-completed";
+      /** Cloned result also returned by Client.run(). */
       readonly outcome: RunOutcome;
     }
   | {
+      /** Runtime transport, cancellation, or client infrastructure rejected. */
       readonly kind: "execution-failed";
+      /** Serializable representation of the rejected error. */
       readonly error: TelemetryError;
     };
 
+/** Non-blocking observer for one telemetry event. Rejections are ignored. */
 export type TelemetryCallback = (event: TelemetryEvent) => void | Promise<void>;
 
+/** Wrap an optional callback so observability cannot alter execution semantics. */
 export function createTelemetryEmitter(
   callback: TelemetryCallback | undefined,
 ): (event: TelemetryEvent) => void {
@@ -73,6 +105,7 @@ export function createTelemetryEmitter(
   };
 }
 
+/** Convert an arbitrary thrown value into a bounded serializable error. */
 export function errorFromUnknown(
   error: unknown,
 ): TelemetryError {

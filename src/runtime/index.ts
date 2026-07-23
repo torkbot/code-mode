@@ -1,8 +1,15 @@
 export type {
+  RunOutcome,
   Runtime,
+  RuntimeConnection,
+  RuntimeDriver,
+  RuntimeDriverConnectRequest,
+  RuntimeExecuteRequest,
+  RuntimeFactory,
   RuntimeFinished,
-  RuntimeInstance,
-  RuntimePayload,
-  RuntimeStartRequest,
+  RuntimeProgramOutput,
+  RuntimeToolCall,
   TypeDefinitionFile,
 } from "../core/runtime.ts";
+
+export { createRuntimeFactory } from "../core/runtime.ts";

@@ -11,12 +11,6 @@ const typeDefinitions = `interface CodeModeConsole {
   warn(...values: unknown[]): void;
 }
 
-type CodeModeGlobalThis = Omit<typeof globalThis, "console" | "globalThis"> & {
-  readonly console: CodeModeConsole;
-  readonly global: CodeModeGlobalThis;
-  readonly globalThis: CodeModeGlobalThis;
-};
-
 interface Tools {
   getWeather(input: {
     readonly location: string;
@@ -28,9 +22,10 @@ interface Tools {
 
 interface AgentProgramScope {
   readonly codemode: Tools;
+  readonly console: CodeModeConsole;
 }
 
-type AgentProgram = (scope: AgentProgramScope) => Promise<void>;
+type AgentProgram = (scope: AgentProgramScope) => unknown;
 `;
 
 test("agent source validation accepts code that matches generated code-mode types", async () => {
@@ -38,7 +33,7 @@ test("agent source validation accepts code that matches generated code-mode type
     signal: AbortSignal.timeout(5_000),
     typeDefinitions,
     typeDefinitionFiles: [],
-    source: `async ({ codemode }) => {
+    source: `export default async function ({ codemode }: AgentProgramScope) {
       await codemode.getWeather({ location: "London" });
     }`,
   });
@@ -51,7 +46,7 @@ test("agent source validation checks the program as ESM", async () => {
     signal: AbortSignal.timeout(5_000),
     typeDefinitions,
     typeDefinitionFiles: [],
-    source: `async () => { void import.meta; }`,
+    source: `export default function () { void import.meta; }`,
   });
 
   assert.equal(failure, undefined);
@@ -62,7 +57,7 @@ test("agent source validation returns serializable diagnostics for type errors",
     signal: AbortSignal.timeout(5_000),
     typeDefinitions,
     typeDefinitionFiles: [],
-    source: `async ({ codemode }) => {
+    source: `export default async function ({ codemode }: AgentProgramScope) {
       await codemode.getWeather({ location: 123 });
     }`,
   });
@@ -82,17 +77,26 @@ test("agent source validation returns serializable diagnostics for type errors",
   assert.ok(failure.report.length < 8_000);
 });
 
-test("agent source validation requires promise to void", async () => {
+test("agent source validation requires a callable default export", async () => {
   const failure = await validateAgentSource({
     signal: AbortSignal.timeout(5_000),
     typeDefinitions,
     typeDefinitionFiles: [],
-    source: `async () => "not void"`,
+    source: `export default 42`,
   });
 
   assert.equal(failure?.kind, "typecheck");
-  assert.match(failure.diagnostics[0]?.message ?? "", /Promise<string>.*Promise<void>/);
-  assert.match(failure.report, /Promise<string>.*Promise<void>/);
+  assert.match(failure.diagnostics[0]?.message ?? "", /number.*AgentProgram/);
+  assert.match(failure.report, /number.*AgentProgram/);
+
+  const missing = await validateAgentSource({
+    signal: AbortSignal.timeout(5_000),
+    typeDefinitions,
+    typeDefinitionFiles: [],
+    source: `export const value = 42`,
+  });
+  assert.equal(missing?.kind, "typecheck");
+  assert.match(missing.diagnostics[0]?.message ?? "", /no default export/i);
 });
 
 test("agent source validation mounts package metadata without checking it as source", async () => {
@@ -109,10 +113,11 @@ test("agent source validation mounts package metadata without checking it as sou
         contents: "export const value: string;",
       },
     ],
-    source: `async () => {
-      const example = await import("example");
-      void example.value;
-    }`,
+    source: `import { value } from "example";
+
+export default function () {
+  void value;
+}`,
   });
 
   assert.equal(failure, undefined);
@@ -123,7 +128,7 @@ test("agent source validation rejects syntax the runtime cannot erase", async ()
     signal: AbortSignal.timeout(5_000),
     typeDefinitions,
     typeDefinitionFiles: [],
-    source: `async () => {
+    source: `export default function () {
       enum Direction { Up }
       void Direction;
     }`,
@@ -138,7 +143,7 @@ test("agent source validation treats optional properties as absence-only", async
     signal: AbortSignal.timeout(5_000),
     typeDefinitions,
     typeDefinitionFiles: [],
-    source: `async ({ codemode }) => {
+    source: `export default async function ({ codemode }: AgentProgramScope) {
       await codemode.getWeather({
         location: "London",
         includeForecast: undefined,
@@ -156,9 +161,9 @@ test("agent source validation rejects runtime type path collisions", async () =>
       signal: AbortSignal.timeout(5_000),
       typeDefinitions,
       typeDefinitionFiles: [
-        { path: "agent.mts", contents: "async () => {};" },
+        { path: "agent.mts", contents: "export default function () {};" },
       ],
-      source: "async () => {}",
+      source: "export default function () {}",
     }),
     /path collides with another validation file: agent\.mts/,
   );
@@ -171,7 +176,7 @@ test("agent source validation rejects runtime type path collisions", async () =>
         { path: "runtime.d.ts", contents: "interface RuntimeValue {}" },
         { path: "runtime.d.ts", contents: "interface DifferentValue {}" },
       ],
-      source: "async () => {}",
+      source: "export default function () {}",
     }),
     /path collides with another validation file: runtime\.d\.ts/,
   );

@@ -4,27 +4,18 @@ export type TranspileResult =
   | { readonly kind: "javascript"; readonly source: string }
   | { readonly kind: "invalid"; readonly report: string };
 
-export const agentProgramFactoryName = "__createCodeModeAgentProgram";
 const maxReportLength = 8_000;
 
+/** Strip erasable TypeScript without wrapping or shifting source locations. */
 export function transpileAgentSource(source: string): TranspileResult {
   try {
-    const result = transformSync(
-      `function ${agentProgramFactoryName}(console, globalThis, global, Promise) {
-  const agentProgram = (${source}\n);
-  return agentProgram;
-}`,
-      {
-        filename: "agent.ts",
-        mode: "strip-only",
-        module: true,
-        sourceMap: false,
-      },
-    );
-    return {
-      kind: "javascript",
-      source: result.code,
-    };
+    const result = transformSync(source, {
+      filename: "agent.ts",
+      mode: "strip-only",
+      module: true,
+      sourceMap: false,
+    });
+    return { kind: "javascript", source: result.code };
   } catch (error) {
     const report = formatTransformError(error);
     return {
@@ -40,9 +31,7 @@ function formatTransformError(error: unknown): string {
   if (isTransformError(error)) {
     return `agent.ts ${error.code}: ${error.message}`;
   }
-  if (error instanceof Error) {
-    return `agent.ts: ${error.message}`;
-  }
+  if (error instanceof Error) return `agent.ts: ${error.message}`;
   return `agent.ts: ${String(error)}`;
 }
 

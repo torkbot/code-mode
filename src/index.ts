@@ -1,4 +1,5 @@
 export type {
+  RunOutcome,
   Runtime,
   TypeDefinitionFile,
 } from "./core/runtime.ts";
@@ -8,9 +9,6 @@ export type {
   SchemaInput,
   SchemaOutput,
 } from "./core/types.ts";
-export type {
-  RunOutcome,
-} from "./core/execution.ts";
 export type {
   Client,
 } from "./core/client.ts";
