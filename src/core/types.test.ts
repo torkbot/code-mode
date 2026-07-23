@@ -67,9 +67,24 @@ test("declarations include schema annotations", () => {
   assert.match(toolbox.typeDefinitions, /readonly temperature: number/);
   assert.match(toolbox.typeDefinitions, /@format date-time/);
   assert.match(toolbox.typeDefinitions, /interface CodeModeConsole/);
+  assert.match(toolbox.typeDefinitions, /Minimal text console supplied/);
   assert.doesNotMatch(toolbox.typeDefinitions, /declare const console/);
+  assert.match(toolbox.typeDefinitions, /Emit ordinary text on stdout/);
   assert.match(toolbox.typeDefinitions, /log\(\.\.\.values: unknown\[\]\): void/);
-  assert.match(toolbox.typeDefinitions, /type AgentProgram/);
+  assert.match(
+    toolbox.typeDefinitions,
+    /interface AgentProgramScope \{[\s\S]*readonly codemode: Tools;[\s\S]*readonly console: CodeModeConsole;/,
+  );
+  assert.match(toolbox.typeDefinitions, /Host tools available to this program/);
+  assert.match(toolbox.typeDefinitions, /only console whose output the runtime captures/);
+  assert.match(
+    toolbox.typeDefinitions,
+    /type AgentProgram = \(scope: AgentProgramScope\) => unknown/,
+  );
+  assert.match(toolbox.typeDefinitions, /default-export a function/);
+  assert.match(toolbox.typeDefinitions, /[Ss]tatic imports/);
+  assert.doesNotMatch(toolbox.typeDefinitions, /CodeModeGlobalThis/);
+  assert.doesNotMatch(toolbox.typeDefinitions, /single async function expression/);
 });
 
 test("empty closed object schemas require an object with no keys", () => {

@@ -1,12 +1,12 @@
 # @torkbot/code-mode
 
-Run agent-authored TypeScript against host-controlled tools on a pluggable
-JavaScript runtime.
+Run agent-authored TypeScript ESM against host-controlled tools on a pluggable,
+long-lived JavaScript runtime.
 
-The library owns generated declarations, checking, TypeScript erasure,
-host-side validation, routing, and telemetry. A runtime adapter describes its
-execution environment, supplies its checker declarations, evaluates a
-self-contained JavaScript module, and provides a bidirectional byte channel.
+Code mode owns tool declarations, checking, TypeScript erasure, host-side schema
+validation, tool routing, telemetry, and its internal wire protocol. Runtime
+drivers own where programs execute, how modules resolve, how the runner is
+booted, and how strongly execution can be isolated or cancelled.
 
 ## Install
 
@@ -14,11 +14,10 @@ self-contained JavaScript module, and provides a bidirectional byte channel.
 npm install @torkbot/code-mode
 ```
 
-The host library requires Node.js 24 or newer. `HostNodeRuntime` is the built-in
-execution adapter; other packages can implement the same runtime contract for
-isolates, microVMs, remote sandboxes, or other JavaScript targets.
+The library requires Node.js 24 or newer on the host. Agent programs can run in
+any environment with a conforming runtime driver.
 
-## Quick Start
+## Quick start
 
 ```ts
 import {
@@ -26,7 +25,7 @@ import {
   createToolbox,
   defineTool,
 } from "@torkbot/code-mode";
-import { HostNodeRuntime } from "@torkbot/code-mode/host-node";
+import { createHostNodeRuntime } from "@torkbot/code-mode/host-node";
 
 const toolbox = createToolbox([
   defineTool(
@@ -36,46 +35,112 @@ const toolbox = createToolbox([
       inputSchema: WeatherInput,
       outputSchema: WeatherReport,
     },
-    async (ctx, input) => {
-      ctx.signal.throwIfAborted();
-      return weatherService.get(input.location);
+    async ({ signal }, input) => {
+      signal.throwIfAborted();
+      return weatherService.get(input.location, { signal });
     },
   ),
 ]);
 
-const runtime = new HostNodeRuntime(process.execPath);
+const runtime = await createHostNodeRuntime(
+  {
+    nodePath: process.execPath,
+    cwd: process.cwd(),
+  },
+  AbortSignal.timeout(5_000),
+);
 
-const client = createClient({
-  toolbox,
-  runtime,
-});
+try {
+  const client = createClient({ runtime, toolbox });
+  const source = `
+import { inspect } from "node:util";
 
-const declarations = toolbox.typeDefinitions;
-const runtimeDescription = runtime.description;
-
-const source = `async ({ codemode }: AgentProgramScope) => {
+export default async function ({ codemode, console }: AgentProgramScope) {
   const weather = await codemode.getWeather({ location: "London" });
-  console.log(weather.conditions);
-}`;
-
-const validation = await client.validate(source, signal);
-if (validation.kind === "invalid") {
-  return validation.report;
+  console.log(inspect(weather));
 }
+`.trimStart();
 
-const outcome = await client.run(source, {
-  signal,
-  onTelemetry: recordEvent,
-});
+  const validation = await client.validate(
+    source,
+    AbortSignal.timeout(5_000),
+  );
+  if (validation.kind === "invalid") {
+    throw new Error(validation.report);
+  }
+
+  const outcome = await client.run(source, {
+    signal: AbortSignal.timeout(30_000),
+    onTelemetry(event) {
+      if (event.kind === "program-output") {
+        process[event.stream].write(event.text);
+      }
+    },
+  });
+} finally {
+  await runtime[Symbol.asyncDispose]();
+}
 ```
 
-`HostNodeRuntime` is not a sandbox. Use it for trusted programs and integration
-tests.
+`createHostNodeRuntime()` starts one Node.js process and returns after its runner
+is ready. Every subsequent `client.run()` is an execution request on that live
+connection. Dispose the runtime when its owner is done with it.
 
-## Tool Schemas
+## Program contract
 
-Every input and output schema must implement both
-[`StandardSchemaV1`](https://github.com/standard-schema/standard-schema) and
+A submitted program is a real ECMAScript module. It may use static imports and
+must have a callable default export assignable to:
+
+```ts
+interface AgentProgramScope {
+  readonly codemode: Tools;
+  readonly console: CodeModeConsole;
+}
+
+type AgentProgram = (scope: AgentProgramScope) => unknown;
+```
+
+The runner evaluates a fresh root module for every execution, calls its default
+export with `{ codemode, console }`, awaits it, and ignores its fulfilled value.
+A program can use either scope field, both, or neither. There is no continuity
+between root modules; a runtime may still use its platform's normal cache for
+imported dependencies.
+
+Only the `console` passed in `AgentProgramScope` is captured. Calls to an ambient
+global console or an imported console are outside the runtime contract. The
+captured console has this minimum surface:
+
+```ts
+interface CodeModeConsole {
+  debug(...values: unknown[]): void;
+  error(...values: unknown[]): void;
+  info(...values: unknown[]): void;
+  log(...values: unknown[]): void;
+  warn(...values: unknown[]): void;
+}
+```
+
+Runtimes format console arguments. Code mode only promises text chunks and
+their provenance:
+
+```ts
+type ProgramOutput = {
+  readonly stream: "stdout" | "stderr";
+  readonly text: string;
+};
+```
+
+The consumer is expected to interpret text. There is no structured-value,
+circular-reference, or console-formatting contract.
+
+`validate()` checks the submitted module itself. `run()` uses Amaro's strip-only
+transform to erase TypeScript in place, with no parser-owned wrapper and no
+prepended source. Runtime stacks therefore retain submitted line and column
+coordinates.
+
+## Tools and checking
+
+Every tool input and output schema implements both `StandardSchemaV1` and
 `StandardJSONSchemaV1`:
 
 ```ts
@@ -85,253 +150,250 @@ type ToolSchema<Input, Output> =
 ```
 
 Standard Schema validates and transforms values on the host. Standard JSON
-Schema produces the input and output JSON Schemas used to synthesize accurate
-agent declarations. The library requests draft 2020-12.
-
-Transforming schemas have four distinct type positions:
+Schema generates exact agent-facing declarations. Transforming schemas have
+four distinct type positions:
 
 | Boundary | Type |
 | --- | --- |
-| Agent supplies tool input | `SchemaInput<InputSchema>` |
+| Program supplies tool input | `SchemaInput<InputSchema>` |
 | Handler receives validated input | `SchemaOutput<InputSchema>` |
-| Handler returns output candidate | `SchemaInput<OutputSchema>` |
-| Agent receives validated output | `SchemaOutput<OutputSchema>` |
+| Handler returns an output candidate | `SchemaInput<OutputSchema>` |
+| Program receives validated output | `SchemaOutput<OutputSchema>` |
 
-`defineTool()` preserves those relationships in TypeScript inference. Tool names
-must be unique JavaScript identifiers other than `then`, which is reserved so the
-tool object cannot become a JavaScript thenable. Descriptions must be non-empty
-because they document the generated declarations.
+Tool names must be unique JavaScript identifiers. `then` and the inherited
+`Object` property names are reserved. Descriptions must be non-empty because
+they become user-facing JSDoc in generated declarations.
 
-The generated declaration printer currently supports object, array, string,
-number, integer, boolean, and null JSON Schemas. Object properties and required
-keys are preserved, and object schemas must explicitly set
-`additionalProperties: false`. Descriptions become JSDoc and string formats
-become `@format` tags. A schema that cannot be represented honestly is rejected
-during type generation. The declarations also define the five runtime-supported
-console methods, so logging checks consistently across environments.
+The declaration printer supports closed objects, arrays, strings, numbers,
+integers, booleans, and null. Object schemas must explicitly set
+`additionalProperties: false`; unsupported schema constructs fail instead of
+being represented loosely.
 
-## Agent API
+`toolbox.typeDefinitions` contains the complete program and tool contract.
+`Runtime.loadTypeDefinitionFiles()` supplies checker-only declarations for the
+execution environment. Those files are mounted in an in-memory TypeScript
+project and are never sent as part of an execution request.
 
-```ts
-interface Client {
-  validate(
-    source: string,
-    signal: AbortSignal,
-  ): Promise<ValidationResult>;
+`validate()` has no runtime side effects. `run()` does not implicitly typecheck,
+but tool inputs and outputs are always validated on the host.
+Tool values crossing a runtime connection must also be JSON-compatible;
+non-JSON inputs or handler results fail that program without closing the shared
+runtime.
 
-  run(
-    source: string,
-    options: {
-      readonly signal: AbortSignal;
-      readonly onTelemetry?: (event: TelemetryEvent) => void;
-    },
-  ): Promise<RunOutcome>;
-}
-```
-
-`toolbox.typeDefinitions` contains the program contract and the complete
-toolbox. It is deterministic and has no runtime side effects.
-
-`runtime.description` is opaque context describing the execution environment.
-An embedder may present it to an agent, transform it, combine it with other
-instructions, or omit it. Code mode does not interpret the description or
-prescribe how an agent harness presents it.
-
-`validate()` uses the released native TypeScript compiler with an in-memory
-project. It mounts the toolbox declarations as `codemode.d.ts` and the files
-returned by `runtime.loadTypeDefinitionFiles()` at their supplied virtual paths.
-Runtime type files are checker-only; they are not included in agent declarations
-or sent to the execution runtime. Because the runtime supplies both these files
-and the execution channel, checking and execution describe the same target.
-Type loading participates in validation cancellation and must stop promptly when
-its signal aborts.
-Validation enforces the same erasable-only TypeScript subset that execution can
-strip. Diagnostics use submitted-source positions; diagnostics and reports are
-serializable and bounded.
-
-`run()` does not typecheck. It strips erasable TypeScript syntax in memory, then
-executes JavaScript. Syntax unsupported by erasable-only TypeScript is a program
-failure. Tool inputs and outputs are always validated on the host, even when the
-agent skips checking.
-
-## Outcomes
+## Outcomes, cancellation, and telemetry
 
 ```ts
 type RunOutcome =
   | { readonly kind: "success" }
-  | { readonly kind: "program-failed"; readonly error: TelemetryError };
+  | {
+      readonly kind: "program-failed";
+      readonly error: TelemetryError;
+    };
 ```
 
-Syntax errors, runtime errors, non-void returns, unknown tool calls, handler
-errors, and input/output validation errors resolve as `program-failed` outcomes.
-Broken runtime transport and violated library invariants reject the promise.
-Aborting an execution rejects it after the runtime is
-terminated.
+Module evaluation errors, a non-callable default export, thrown or rejected
+programs, unknown tools, handler failures, and schema failures resolve as
+`program-failed`. The default export's fulfilled value never affects the
+outcome. Transport failures and execution cancellation reject the promise.
 
-Validation failures include a bounded source-framed report. Runtime tool
-validation failures also expose a report through
-`outcome.error.details.kind === "tool-validation"`.
+An execution signal governs only that execution and its active tool handlers.
+It does not close the runtime or cancel other multiplexed executions.
 
-## Telemetry
+Telemetry reports:
 
-Events cover console logs, tool start/completion/failure, and terminal execution
-completion/failure.
+- `program-output` with `stream` and `text`;
+- tool call start, completion, and failure;
+- terminal execution completion or infrastructure failure.
 
-```ts
-const outcome = await client.run(source, {
-  signal,
-  onTelemetry(event) {
-    if (event.kind === "tool-call-started") {
-      console.log(event.toolName, event.input);
-    }
-  },
-});
-```
+Telemetry callbacks are observational. Their throws and rejected promises do
+not alter program execution.
 
-Console values are decoded before callback delivery and preserve circular object
-references. Exceptions thrown by telemetry callbacks are isolated from program
-execution.
+## Runtime lifecycle
 
-## Runtime Contract
-
-Runtime authors import the complete author surface from
-`@torkbot/code-mode/runtime`:
+The public runtime used by a client is already connected:
 
 ```ts
-interface Runtime {
+interface Runtime extends AsyncDisposable {
   readonly description: string;
+  readonly finished: Promise<RuntimeFinished>;
+
   loadTypeDefinitionFiles(
     signal: AbortSignal,
   ): Promise<readonly TypeDefinitionFile[]>;
-  start(request: {
-    readonly payload: {
-      readonly kind: "javascript-module";
-      readonly source: string;
-    };
+
+  execute(request: {
+    readonly source: string;
     readonly signal: AbortSignal;
-  }): Promise<RuntimeInstance>;
+    invokeTool(call: RuntimeToolCall): Promise<unknown>;
+    emitOutput(output: {
+      readonly stream: "stdout" | "stderr";
+      readonly text: string;
+    }): void;
+  }): Promise<RunOutcome>;
+
+  [Symbol.asyncDispose](): Promise<void>;
+}
+```
+
+`description` is opaque environment context an embedder may present to an
+agent. `finished` always resolves when the runtime becomes unusable: `closed`
+for an orderly end, or `failed` with the underlying error. Async disposal closes
+the connection and waits for driver-owned resources to stop.
+
+Scheduling belongs to the driver. Clients always receive promises; a driver may
+serialize them. The built-in Host Node driver is fully multiplexed.
+
+## Authoring a runtime driver
+
+Driver authors use `@torkbot/code-mode/runtime`:
+
+```ts
+interface RuntimeDriver<Options> {
+  readonly description: string;
+
+  loadTypeDefinitionFiles(
+    signal: AbortSignal,
+  ): Promise<readonly TypeDefinitionFile[]>;
+
+  connect(
+    options: Options,
+    request: {
+      readonly runnerSource: string;
+      readonly signal: AbortSignal;
+    },
+  ): Promise<RuntimeConnection>;
 }
 
-interface TypeDefinitionFile {
-  readonly path: string;
-  readonly contents: string;
-}
-
-interface RuntimeInstance {
+interface RuntimeConnection extends AsyncDisposable {
   readonly channel: {
     readonly readable: ReadableStream<Uint8Array>;
     readonly writable: WritableStream<Uint8Array>;
   };
-  readonly finished: Promise<
-    | { readonly kind: "closed" }
-    | { readonly kind: "failed"; readonly error: Error }
-  >;
-  terminate(reason: string): Promise<void>;
-}
-
-```
-
-The payload contains all code-mode support code and the submitted agent program.
-It is a self-contained ECMAScript module with this entrypoint:
-
-```ts
-export function startProgram(channel: {
-  readonly readable: ReadableStream<Uint8Array>;
-  readonly writable: WritableStream<Uint8Array>;
-}): Promise<void>;
-```
-
-The description is opaque to code mode. The type definition files describe the
-ambient APIs available to checked programs. Agent-authored dynamic imports use
-the target environment's normal module resolution.
-
-`start()` evaluates the payload as a module and invokes `startProgram()` exactly
-once with the runtime endpoint of a byte channel. The returned instance exposes
-the host endpoint: writes to either endpoint's `writable` stream arrive in order
-on its peer's `readable` stream. Code mode acquires and closes each writer; a
-runtime substrate only supplies standard Web Streams. How those endpoints are
-connected is entirely the runtime's decision: in-memory queues, streams, ports,
-sockets, RPC, and process pipes are all valid implementations of the same
-logical channel.
-
-`start()` resolves only after the payload is launched and the host endpoint is
-ready. Setup failures reject after partial execution is stopped. After launch,
-`finished` always resolves: `closed` means normal completion or requested
-termination; `failed` carries an unexpected runtime failure. `terminate()` is
-idempotent and resolves after `finished`. Aborting the start signal must stop a
-launched execution promptly.
-
-The contract does not contain commands, paths, files, descriptors, environment
-variables, process APIs, or vendor objects. A runtime may use any of them
-internally, but code mode neither supplies nor observes those mechanics.
-
-## Node Adapters
-
-`@torkbot/code-mode/node` provides `Node24Runtime`. It owns the Node.js 24
-checker declarations, target-version check, and bootstrap that adapts the
-runtime payload to Node. Its required `Node24RuntimeHost` owns the actual
-execution substrate:
-
-```ts
-interface Node24RuntimeHost {
-  readNodeVersion(signal: AbortSignal): Promise<string>;
-  launchNode(request: {
-    readonly bootstrapSource: string;
-    readonly channelFileDescriptor: number;
-    readonly signal: AbortSignal;
-  }): Promise<RuntimeInstance>;
+  readonly finished: Promise<RuntimeFinished>;
+  [Symbol.asyncDispose](): Promise<void>;
 }
 ```
 
-`launchNode()` evaluates the supplied source as the Node entrypoint, connects
-the requested full-duplex descriptor, and returns its peer plus lifecycle. It
-owns source delivery, cwd, process creation, termination, and errors.
-This is a Node adapter boundary, not part of the substrate-neutral `Runtime`
-contract.
-
-### Host Node.js
+Expose a user-facing factory by closing over the driver:
 
 ```ts
-const runtime = new HostNodeRuntime(process.execPath);
+import { createRuntimeFactory } from "@torkbot/code-mode/runtime";
+
+const driver: RuntimeDriver<MyOptions> = {
+  description: "My runtime",
+  loadTypeDefinitionFiles,
+  connect,
+};
+
+export const createMyRuntime = createRuntimeFactory(driver);
 ```
 
-The required path must identify a Node.js 24 binary and is checked before type
-loading or execution. The generated module is loaded in memory against a virtual
-file URL rooted at the child working directory, so bare dynamic imports use
-normal Node.js package resolution. The byte channel uses fd 3. The runtime
-supplies the bundled Node.js 24 declarations to the checker.
+The factory owns the version-matched runner, readiness handshake, internal
+execution IDs, wire protocol, and failed-boot cleanup. Its signal governs boot
+through readiness and then detaches. The caller that creates the runtime owns
+its later lifetime.
 
-Sandbox-specific Node launching is deliberately not implemented here.
-`@torkbot/code-mode-sandbox` owns the `@torkbot/sandbox` host implementation,
-including VM lifecycle, spawn options, pipes, cwd, and Sandbox errors, while
-reusing `Node24Runtime` for the Node-owned behavior.
+`connect()` boots the execution environment, wires one runner to the returned
+byte channel, and returns the connection. The driver can use any process,
+isolate, VM, worker, socket, provider API, or in-memory transport. Agent source,
+tool calls, output, outcomes, cancellation, and opaque correlation are carried
+by execution requests after boot; they are not driver options.
 
-## Other JavaScript Runtimes
+The byte framing and messages are internal to this package. Drivers transport
+bytes; they do not reproduce or interpret the protocol.
 
-The payload is an ECMAScript module contract, not a Node process ABI. Deno and
-Bun adapters can evaluate the same payload with target-specific declarations
-and channel bridges. A Worker or serverless adapter can wrap or upload the
-module and connect its endpoint through streams, ports, or provider RPC. A
-platform that cannot launch supplied module code, provide the bidirectional
-channel, or honor termination does not satisfy `Runtime`; the contract does not
-invent a weaker fallback for it.
+### Bootstrapping the runner
 
-## Runtime Conformance
+Platforms that can preinstall the package use the normal ESM export:
 
-Runtime implementations run the same exported black-box suite:
+```ts
+import { startRunner } from "@torkbot/code-mode/runner";
+
+await startRunner({
+  channel,
+  schedule: (execute) => execute(),
+  importModule: ({ source, signal }) => importFreshRoot(source, signal),
+  createConsole: (emit) => createPlatformConsole(emit),
+});
+```
+
+Some runtimes cannot preinstall npm modules. Every `connect()` request therefore
+also receives `runnerSource`: self-contained ESM source exporting the same
+`startRunner()` implementation. A driver can evaluate or upload that source and
+append only its platform glue. The equivalent artifact is exported from
+`@torkbot/code-mode/runner/source` for driver tooling and inspection, but normal
+runtime users never plumb it.
+
+`schedule()` wraps the complete module-evaluation and default-export invocation.
+Call its callback immediately to multiplex, or queue callbacks to serialize a
+runtime. `importModule()` must evaluate each request as a fresh root ESM module
+and use the target's native static-import resolution. Its signal provides
+logical cancellation; runtimes with stronger interruption primitives can apply
+them there. `createConsole()` must call `emit` with text plus `stdout` or
+`stderr`.
+
+## Built-in Host Node driver
+
+```ts
+import { createHostNodeRuntime } from "@torkbot/code-mode/host-node";
+
+const runtime = await createHostNodeRuntime(
+  { nodePath: process.execPath, cwd: process.cwd() },
+  bootSignal,
+);
+```
+
+The driver requires Node.js 24. It starts one long-lived child process per
+runtime, connects its runner over fd 3, and multiplexes executions. Programs use
+native Node ESM resolution rooted at `cwd`, including ordinary ESM/CJS package
+interop. The child constructs the captured console with `node:console`; its
+ambient stdout, stderr, and global console are not program-output channels.
+
+Host Node is not a sandbox. Use it for trusted programs and conformance tests.
+Sandbox vendors and `@torkbot/code-mode-sandbox` should implement their own
+driver while reusing the standard factory and runner.
+
+Node retains each unique root module record in its module map until the runtime
+process is disposed. Imported dependencies may also remain cached. Code mode
+does not pretend to evict native module records or add process recycling policy;
+runtime owners should choose a lifecycle appropriate to their workload. To
+observe the retained-memory profile locally:
+
+```sh
+npm run benchmark:host-node-memory
+```
+
+The benchmark reports samples and does not impose a universal pass/fail limit.
+
+## Runtime conformance
+
+Every driver should run the exported black-box suite:
 
 ```ts
 import { testRuntime } from "@torkbot/code-mode/testing";
 
 testRuntime({
   name: "my runtime",
-  createRuntime: async () => new MyRuntime(),
+  createRuntime(signal) {
+    return createMyRuntime(requiredOptions, signal);
+  },
 });
 ```
 
-The factory is always asynchronous. The suite exercises the public client API
-as an agent would: complete declarations, checking, TypeScript
-execution, schema transformations, sequential/parallel/interleaved calls,
-failures, telemetry, cancellation, concurrency, and execution isolation. It
-makes no assumptions about processes, files, descriptors, or the adapter's
-internal transport.
+The suite creates and disposes arbitrary runtime instances. It exercises both
+the public `Runtime` interface and the public client journey without observing a
+driver, connection, process, or wire message.
+
+## Breaking migration
+
+This version replaces the previous execution stack instead of adapting it:
+
+- submit ESM with a callable default export, not a function expression;
+- read both `codemode` and the captured `console` from the scope argument;
+- create a connected runtime with an async factory, then dispose it;
+- implement `RuntimeDriver.connect()` for new platforms, not
+  `Runtime.start()`/`RuntimeInstance`/payload launch layers;
+- consume `program-output` text with explicit stdout/stderr provenance, not
+  structured console values;
+- import the built-in factory from `@torkbot/code-mode/host-node`; the old
+  `@torkbot/code-mode/node` adapter surface is removed.
