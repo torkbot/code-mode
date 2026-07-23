@@ -332,6 +332,43 @@ logical cancellation; runtimes with stronger interruption primitives can apply
 them there. `createConsole()` must call `emit` with text plus `stdout` or
 `stderr`.
 
+### Authoring a Node.js 24 driver
+
+Node.js 24 driver authors can reuse code-mode's version-matched declarations
+and guest execution semantics without adopting the built-in Host Node process
+lifecycle:
+
+```ts
+import {
+  assertNode24Version,
+  createNode24BootstrapSource,
+  loadNode24TypeDefinitionFiles,
+} from "@torkbot/code-mode/node-runtime";
+
+const driver: RuntimeDriver<MyNodeOptions> = {
+  description: "My Node.js 24 runtime",
+  loadTypeDefinitionFiles: loadNode24TypeDefinitionFiles,
+  async connect(options, { runnerSource, signal }) {
+    const version = await readRuntimeNodeVersion(options, signal);
+    assertNode24Version(version, "My Node runtime");
+
+    const bootstrapSource = createNode24BootstrapSource({
+      runnerSource,
+      channelFileDescriptor: 3,
+    });
+    return launchRuntimeNode(options, bootstrapSource, signal);
+  },
+};
+```
+
+The generated self-contained ESM attaches to the supplied full-duplex file
+descriptor, multiplexes executions, evaluates fresh root modules with native
+Node resolution from `process.cwd()`, and constructs the captured console with
+`node:console`. The driver still owns how the source reaches Node, how the file
+descriptor is connected, ambient stdio, boot cancellation, and process
+lifecycle. This keeps Host Node, Sandbox Node, and other Node substrates aligned
+without importing each other's launch mechanics.
+
 ## Built-in Host Node driver
 
 ```ts
@@ -351,7 +388,8 @@ ambient stdout, stderr, and global console are not program-output channels.
 
 Host Node is not a sandbox. Use it for trusted programs and conformance tests.
 Sandbox vendors and `@torkbot/code-mode-sandbox` should implement their own
-driver while reusing the standard factory and runner.
+driver while reusing the standard factory and the Node runtime authoring
+surface where applicable.
 
 Node retains each unique root module record in its module map until the runtime
 process is disposed. Imported dependencies may also remain cached. Code mode
