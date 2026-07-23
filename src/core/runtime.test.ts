@@ -101,6 +101,40 @@ test("a runtime factory rejects malformed runner messages and cleans up the conn
   assert.equal(disposalCount, 1);
 });
 
+test("a runtime factory disposes a connection when runtime construction fails", async () => {
+  let disposalCount = 0;
+  const writable = new WritableStream<Uint8Array>();
+  const lock = writable.getWriter();
+  const driver: RuntimeDriver<Record<string, never>> = {
+    description: "locked connection",
+    async loadTypeDefinitionFiles() {
+      return [];
+    },
+    async connect() {
+      return {
+        channel: {
+          readable: new ReadableStream<Uint8Array>(),
+          writable,
+        },
+        finished: Promise.resolve({ kind: "closed" }),
+        async [Symbol.asyncDispose]() {
+          disposalCount += 1;
+        },
+      };
+    },
+  };
+
+  try {
+    await assert.rejects(
+      createRuntimeFactory(driver)({}, AbortSignal.timeout(5_000)),
+      /locked/,
+    );
+    assert.equal(disposalCount, 1);
+  } finally {
+    lock.releaseLock();
+  }
+});
+
 test("runtime execution observes cancellation while installing its abort listener", async () => {
   const driver: RuntimeDriver<Record<string, never>> = {
     description: "in-memory JavaScript",

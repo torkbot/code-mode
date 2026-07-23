@@ -1,4 +1,5 @@
 import { settleBeforeAbort } from "./abort.ts";
+import { assertJsonValue } from "./json.ts";
 import type {
   RunOutcome,
   Runtime,
@@ -159,6 +160,7 @@ async function runProgram(req: {
 
       try {
         const output = await invokeTool(req, call);
+        assertJsonValue(output);
         req.emitTelemetry({
           kind: "tool-call-completed",
           toolCallId,

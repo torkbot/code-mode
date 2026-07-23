@@ -132,7 +132,6 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
   type ExecutionState = {
     readonly cancellation: AbortController;
     readonly toolResponses: Map<string, ToolResponse>;
-    cancelled: boolean;
   };
 
   const send = (message: RunnerMessage): Promise<void> => {
@@ -174,11 +173,9 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
         const state: ExecutionState = {
           cancellation: new AbortController(),
           toolResponses: new Map(),
-          cancelled: false,
         };
         executions.set(message.executionId, state);
         void options.schedule(() => executeProgram(message, state)).catch((error: unknown) => {
-          state.cancelled = true;
           executions.delete(message.executionId);
           state.cancellation.abort(error);
           for (const response of state.toolResponses.values()) {
@@ -194,7 +191,6 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
       if (state === undefined) continue;
 
       if (message.kind === "cancel") {
-        state.cancelled = true;
         state.cancellation.abort(reviveError(message.error));
         for (const response of state.toolResponses.values()) {
           response.reject(state.cancellation.signal.reason);
@@ -227,7 +223,6 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
 
   function cancelExecutions(reason: unknown): void {
     for (const state of executions.values()) {
-      state.cancelled = true;
       state.cancellation.abort(reason);
       for (const response of state.toolResponses.values()) {
         response.reject(reason);
@@ -241,11 +236,11 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
     message: Extract<HostMessage, { readonly kind: "execute" }>,
     state: ExecutionState,
   ): Promise<void> {
-    if (state.cancelled) return;
+    if (state.cancellation.signal.aborted) return;
     state.cancellation.signal.throwIfAborted();
     let nextToolCallId = 0;
     const emit = (output: RunnerProgramOutput): void => {
-      if (state.cancelled) return;
+      if (state.cancellation.signal.aborted) return;
       void send({
         kind: "program-output",
         executionId: message.executionId,
@@ -259,6 +254,7 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
         if (typeof property !== "string" || property === "then") return undefined;
         return (input: unknown): Promise<unknown> => {
           try {
+            state.cancellation.signal.throwIfAborted();
             assertJsonValue(input);
           } catch (error) {
             return Promise.reject(error);
@@ -301,9 +297,10 @@ export async function startRunner(options: RunnerOptions): Promise<void> {
       };
     }
 
-    if (state.cancelled) return;
+    if (state.cancellation.signal.aborted) return;
     executions.delete(message.executionId);
     const completed = new Error("Code-mode program execution completed");
+    state.cancellation.abort(completed);
     for (const response of state.toolResponses.values()) response.reject(completed);
     state.toolResponses.clear();
     await send({

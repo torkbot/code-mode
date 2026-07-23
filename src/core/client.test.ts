@@ -8,8 +8,9 @@ import type {
   RuntimeExecuteRequest,
 } from "./runtime.ts";
 import type { TelemetryEvent } from "./telemetry.ts";
+import { errorFromUnknown } from "./telemetry.ts";
 import { createToolbox, defineTool } from "./types.ts";
-import { testSchema } from "../testing/schema.ts";
+import { testSchema, testTransformSchema } from "../testing/schema.ts";
 
 const EmptyObject = testSchema({
   type: "object",
@@ -124,6 +125,64 @@ test("client runs ESM without shifting source locations and emits text program o
     stream: "stdout",
     text: "echoed\n",
   });
+});
+
+test("client reports non-JSON tool outputs as failed telemetry", async () => {
+  const runtime = createTestRuntime({
+    async execute(request) {
+      try {
+        await request.invokeTool({
+          name: "timestamp",
+          input: {},
+          signal: request.signal,
+        });
+        return { kind: "success" };
+      } catch (error) {
+        return {
+          kind: "program-failed",
+          error: errorFromUnknown(error),
+        };
+      }
+    },
+  });
+  const DateOutput = testTransformSchema<string, Date>({
+    inputJsonSchema: { type: "string" },
+    outputJsonSchema: { type: "string", format: "date-time" },
+    validate() {
+      return { value: new Date("2026-07-23T00:00:00Z") };
+    },
+  });
+  const toolbox = createToolbox([
+    defineTool(
+      "timestamp",
+      {
+        description: "Return a timestamp.",
+        inputSchema: EmptyObject,
+        outputSchema: DateOutput,
+      },
+      async () => "2026-07-23T00:00:00Z",
+    ),
+  ]);
+  const client = createClient({ runtime, toolbox });
+  const events: TelemetryEvent[] = [];
+
+  const outcome = await client.run(
+    "export default async function ({ codemode }) { await codemode.timestamp({}); }",
+    {
+      signal: AbortSignal.timeout(5_000),
+      onTelemetry(event) {
+        events.push(event);
+      },
+    },
+  );
+
+  assert.equal(outcome.kind, "program-failed");
+  assert.match(outcome.error.message, /JSON-compatible/);
+  assert.deepEqual(events.map((event) => event.kind), [
+    "tool-call-started",
+    "tool-call-failed",
+    "execution-completed",
+  ]);
 });
 
 function createTestRuntime(
